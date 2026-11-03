@@ -35,16 +35,22 @@ interface NavItem {
 }
 
 function getNavItems(role: string): NavItem[] {
+  const dashboardItem = {
+    label: "Dashboard",
+    href: `/dashboard/roles/${role.toLowerCase()}`,
+    icon: <LayoutDashboard size={20} />,
+  };
+
   switch (role) {
     case "MITRA":
       return [
-        { label: "Dashboard", href: "/dashboard", icon: <LayoutDashboard size={20} /> },
+        dashboardItem,
         { label: "Absensi", href: "/dashboard/absensi", icon: <Camera size={20} /> },
         { label: "Riwayat Absensi", href: "/dashboard/riwayat-absensi", icon: <History size={20} /> },
       ];
     case "VENDOR":
       return [
-        { label: "Dashboard", href: "/dashboard", icon: <LayoutDashboard size={20} /> },
+        dashboardItem,
         { label: "Data Mitra OS", href: "/dashboard/mitra", icon: <Users size={20} /> },
         { label: "Riwayat Absensi", href: "/dashboard/riwayat-absensi", icon: <History size={20} /> },
         { label: "Daftar Klaim", href: "/dashboard/klaim", icon: <ClipboardList size={20} /> },
@@ -53,7 +59,7 @@ function getNavItems(role: string): NavItem[] {
       ];
     case "VM":
       return [
-        { label: "Dashboard", href: "/dashboard", icon: <LayoutDashboard size={20} /> },
+        dashboardItem,
         { label: "Pilih Vendor", href: "/dashboard/vendor", icon: <Building2 size={20} /> },
         { label: "Approval Akun", href: "/dashboard/approval-akun", icon: <UserCheck size={20} /> },
         { label: "Data Mitra OS", href: "/dashboard/mitra", icon: <Users size={20} /> },
@@ -64,17 +70,17 @@ function getNavItems(role: string): NavItem[] {
       ];
     case "SM":
       return [
-        { label: "Dashboard", href: "/dashboard", icon: <LayoutDashboard size={20} /> },
+        dashboardItem,
         { label: "Request OS", href: "/dashboard/request-os", icon: <FileText size={20} /> },
       ];
     case "GM":
       return [
-        { label: "Dashboard", href: "/dashboard", icon: <LayoutDashboard size={20} /> },
+        dashboardItem,
         { label: "Approval Request", href: "/dashboard/approval", icon: <CheckCircle size={20} /> },
       ];
     case "COO":
       return [
-        { label: "Dashboard", href: "/dashboard", icon: <LayoutDashboard size={20} /> },
+        dashboardItem,
         { label: "Approval Request", href: "/dashboard/approval", icon: <CheckCircle size={20} /> },
       ];
     default:
