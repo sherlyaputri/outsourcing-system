@@ -1,0 +1,185 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  password      String
+  name          String
+  role          String    // MITRA, VENDOR, VM, SM, GM, COO
+  status        String    @default("ACTIVE") // ACTIVE, INACTIVE, PENDING
+  phone         String?
+  avatar        String?
+  vendorId      String?
+  vendor        Vendor?   @relation(fields: [vendorId], references: [id])
+  mitraProfile  MitraProfile?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  // Relations
+  attendances       Attendance[]
+  sentApprovals     Approval[]    @relation("ApprovalCreator")
+  handledApprovals  Approval[]    @relation("ApprovalHandler")
+  osRequests        OSRequest[]   @relation("OSRequestCreator")
+  accountRequests   AccountRequest[] @relation("AccountRequestCreator")
+  handledAccountReqs AccountRequest[] @relation("AccountRequestHandler")
+}
+
+model Vendor {
+  id          String   @id @default(cuid())
+  name        String
+  address     String?
+  phone       String?
+  email       String?
+  status      String   @default("PENDING") // PENDING, ACTIVE, INACTIVE
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users       User[]
+  mitraProfiles MitraProfile[]
+  claims      Claim[]
+  invoices    Invoice[]
+  osRequests  OSRequest[] @relation("OSRequestVendor")
+}
+
+model MitraProfile {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id])
+  vendorId        String
+  vendor          Vendor   @relation(fields: [vendorId], references: [id])
+  nik             String?
+  tempatLahir     String?
+  tanggalLahir    DateTime?
+  alamat          String?
+  noBpjs          String?
+  noRekening      String?
+  namaBank        String?
+  fotoKtp         String?
+  fotoSelfie      String?
+  faceDescriptor  String?  // JSON string of face descriptor for recognition
+  penempatan      String?  // work placement location
+  posisi          String?  // position
+  startDate       DateTime?
+  endDate         DateTime?
+  status          String   @default("ACTIVE") // ACTIVE, INACTIVE, REPLACED
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model Attendance {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  date        DateTime @default(now())
+  checkIn     DateTime?
+  checkOut    DateTime?
+  type        String   @default("HADIR") // HADIR, IZIN, SAKIT, ALPHA
+  fotoCheckIn String?  // base64 or path to captured face image
+  fotoCheckOut String?
+  latitude    Float?
+  longitude   Float?
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model OSRequest {
+  id          String   @id @default(cuid())
+  type        String   // PENAMBAHAN, PERGANTIAN, PENGURANGAN
+  status      String   @default("PENDING") // PENDING, APPROVED_GM, APPROVED_COO, VENDOR_SELECTED, IN_PROGRESS, COMPLETED, REJECTED
+  requesterId String
+  requester   User     @relation("OSRequestCreator", fields: [requesterId], references: [id])
+  vendorId    String?
+  vendor      Vendor?  @relation("OSRequestVendor", fields: [vendorId], references: [id])
+  jumlah      Int      @default(1)
+  posisi      String?
+  penempatan  String?
+  alasan      String?
+  catatan     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  approvals   Approval[]
+  candidates  Candidate[]
+}
+
+model Approval {
+  id          String   @id @default(cuid())
+  osRequestId String
+  osRequest   OSRequest @relation(fields: [osRequestId], references: [id])
+  approverId  String
+  approver    User     @relation("ApprovalHandler", fields: [approverId], references: [id])
+  creatorId   String
+  creator     User     @relation("ApprovalCreator", fields: [creatorId], references: [id])
+  level       String   // GM, COO
+  status      String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  catatan     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Candidate {
+  id          String    @id @default(cuid())
+  osRequestId String
+  osRequest   OSRequest @relation(fields: [osRequestId], references: [id])
+  name        String
+  nik         String?
+  phone       String?
+  status      String    @default("KANDIDAT") // KANDIDAT, TERPILIH, DITOLAK
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model AccountRequest {
+  id          String   @id @default(cuid())
+  type        String   // VENDOR, MITRA
+  name        String
+  email       String
+  phone       String?
+  vendorId    String?
+  requesterId String
+  requester   User     @relation("AccountRequestCreator", fields: [requesterId], references: [id])
+  handlerId   String?
+  handler     User?    @relation("AccountRequestHandler", fields: [handlerId], references: [id])
+  status      String   @default("PENDING") // PENDING, APPROVED, REJECTED, ACTIVATED
+  catatan     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Claim {
+  id          String   @id @default(cuid())
+  vendorId    String
+  vendor      Vendor   @relation(fields: [vendorId], references: [id])
+  bulan       String   // format: YYYY-MM
+  jenisClaim  String   // GAJI, BPJS, LEMBUR, TRANSPORT, etc.
+  jumlahMitra Int
+  nominal     Float
+  status      String   @default("DRAFT") // DRAFT, SUBMITTED, APPROVED, REJECTED
+  catatan     String?
+  dokumen     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Invoice {
+  id          String   @id @default(cuid())
+  vendorId    String
+  vendor      Vendor   @relation(fields: [vendorId], references: [id])
+  nomorInvoice String  @unique
+  bulan       String   // format: YYYY-MM
+  totalAmount Float
+  status      String   @default("DRAFT") // DRAFT, SUBMITTED, VERIFIED, PAID
+  tanggalJatuhTempo DateTime?
+  catatan     String?
+  dokumen     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
