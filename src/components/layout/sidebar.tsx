@@ -25,7 +25,7 @@ import {
 interface SidebarProps {
   role: string;
   userName: string;
-  vendorName?: string;
+  vendorName?: string | null;
 }
 
 interface NavItem {

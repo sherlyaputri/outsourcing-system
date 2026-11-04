@@ -15,7 +15,7 @@ model User {
   role          String    // MITRA, VENDOR, VM, SM, GM, COO
   status        String    @default("ACTIVE") // ACTIVE, INACTIVE, PENDING
   phone         String?
-  avatar        String?
+  avatar        String?   @db.Text
   vendorId      String?
   vendor        Vendor?   @relation(fields: [vendorId], references: [id])
   mitraProfile  MitraProfile?
@@ -23,106 +23,106 @@ model User {
   updatedAt     DateTime  @updatedAt
 
   // Relations
-  attendances       Attendance[]
-  sentApprovals     Approval[]    @relation("ApprovalCreator")
-  handledApprovals  Approval[]    @relation("ApprovalHandler")
-  osRequests        OSRequest[]   @relation("OSRequestCreator")
-  accountRequests   AccountRequest[] @relation("AccountRequestCreator")
+  attendances        Attendance[]
+  sentApprovals      Approval[]       @relation("ApprovalCreator")
+  handledApprovals   Approval[]       @relation("ApprovalHandler")
+  osRequests         OSRequest[]      @relation("OSRequestCreator")
+  accountRequests    AccountRequest[] @relation("AccountRequestCreator")
   handledAccountReqs AccountRequest[] @relation("AccountRequestHandler")
 }
 
 model Vendor {
-  id          String   @id @default(cuid())
-  name        String
-  address     String?
-  phone       String?
-  email       String?
-  status      String   @default("PENDING") // PENDING, ACTIVE, INACTIVE
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String         @id @default(cuid())
+  name          String
+  address       String?        @db.Text
+  phone         String?
+  email         String?
+  status        String         @default("PENDING") // PENDING, ACTIVE, INACTIVE
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
 
-  users       User[]
+  users         User[]
   mitraProfiles MitraProfile[]
-  claims      Claim[]
-  invoices    Invoice[]
-  osRequests  OSRequest[] @relation("OSRequestVendor")
+  claims        Claim[]
+  invoices      Invoice[]
+  osRequests    OSRequest[]    @relation("OSRequestVendor")
 }
 
 model MitraProfile {
-  id              String   @id @default(cuid())
-  userId          String   @unique
-  user            User     @relation(fields: [userId], references: [id])
-  vendorId        String
-  vendor          Vendor   @relation(fields: [vendorId], references: [id])
-  nik             String?
-  tempatLahir     String?
-  tanggalLahir    DateTime?
-  alamat          String?
-  noBpjs          String?
-  noRekening      String?
-  namaBank        String?
-  fotoKtp         String?
-  fotoSelfie      String?
-  faceDescriptor  String?  // JSON string of face descriptor for recognition
-  penempatan      String?  // work placement location
-  posisi          String?  // position
-  startDate       DateTime?
-  endDate         DateTime?
-  status          String   @default("ACTIVE") // ACTIVE, INACTIVE, REPLACED
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id             String    @id @default(cuid())
+  userId         String    @unique
+  user           User      @relation(fields: [userId], references: [id])
+  vendorId       String
+  vendor         Vendor    @relation(fields: [vendorId], references: [id])
+  nik            String?
+  tempatLahir    String?
+  tanggalLahir   DateTime?
+  alamat         String?   @db.Text
+  noBpjs         String?
+  noRekening     String?
+  namaBank       String?
+  fotoKtp        String?   @db.LongText
+  fotoSelfie     String?   @db.LongText
+  faceDescriptor String?   @db.Text
+  penempatan     String?
+  posisi         String?
+  startDate      DateTime?
+  endDate        DateTime?
+  status         String    @default("ACTIVE") // ACTIVE, INACTIVE, REPLACED
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 }
 
 model Attendance {
-  id          String   @id @default(cuid())
-  userId      String
-  user        User     @relation(fields: [userId], references: [id])
-  date        DateTime @default(now())
-  checkIn     DateTime?
-  checkOut    DateTime?
-  type        String   @default("HADIR") // HADIR, IZIN, SAKIT, ALPHA
-  fotoCheckIn String?  // base64 or path to captured face image
-  fotoCheckOut String?
-  latitude    Float?
-  longitude   Float?
-  note        String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id])
+  date         DateTime  @default(now())
+  checkIn      DateTime?
+  checkOut     DateTime?
+  type         String    @default("HADIR") // HADIR, IZIN, SAKIT, ALPHA
+  fotoCheckIn  String?   @db.LongText
+  fotoCheckOut String?   @db.LongText
+  latitude     Float?
+  longitude    Float?
+  note         String?   @db.Text
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
 
 model OSRequest {
-  id          String   @id @default(cuid())
-  type        String   // PENAMBAHAN, PERGANTIAN, PENGURANGAN
-  status      String   @default("PENDING") // PENDING, APPROVED_GM, APPROVED_COO, VENDOR_SELECTED, IN_PROGRESS, COMPLETED, REJECTED
+  id          String      @id @default(cuid())
+  type        String      // PENAMBAHAN, PERGANTIAN, PENGURANGAN
+  status      String      @default("PENDING") // PENDING, APPROVED_GM, APPROVED_COO, VENDOR_SELECTED, IN_PROGRESS, COMPLETED, REJECTED
   requesterId String
-  requester   User     @relation("OSRequestCreator", fields: [requesterId], references: [id])
+  requester   User        @relation("OSRequestCreator", fields: [requesterId], references: [id])
   vendorId    String?
-  vendor      Vendor?  @relation("OSRequestVendor", fields: [vendorId], references: [id])
-  jumlah      Int      @default(1)
+  vendor      Vendor?     @relation("OSRequestVendor", fields: [vendorId], references: [id])
+  jumlah      Int         @default(1)
   posisi      String?
   penempatan  String?
-  alasan      String?
-  catatan     String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  alasan      String?     @db.Text
+  catatan     String?     @db.Text
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
 
   approvals   Approval[]
   candidates  Candidate[]
 }
 
 model Approval {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   osRequestId String
   osRequest   OSRequest @relation(fields: [osRequestId], references: [id])
   approverId  String
-  approver    User     @relation("ApprovalHandler", fields: [approverId], references: [id])
+  approver    User      @relation("ApprovalHandler", fields: [approverId], references: [id])
   creatorId   String
-  creator     User     @relation("ApprovalCreator", fields: [creatorId], references: [id])
-  level       String   // GM, COO
-  status      String   @default("PENDING") // PENDING, APPROVED, REJECTED
-  catatan     String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  creator     User      @relation("ApprovalCreator", fields: [creatorId], references: [id])
+  level       String    // GM, COO
+  status      String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  catatan     String?   @db.Text
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 }
 
 model Candidate {
@@ -149,7 +149,7 @@ model AccountRequest {
   handlerId   String?
   handler     User?    @relation("AccountRequestHandler", fields: [handlerId], references: [id])
   status      String   @default("PENDING") // PENDING, APPROVED, REJECTED, ACTIVATED
-  catatan     String?
+  catatan     String?  @db.Text
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
@@ -163,23 +163,23 @@ model Claim {
   jumlahMitra Int
   nominal     Float
   status      String   @default("DRAFT") // DRAFT, SUBMITTED, APPROVED, REJECTED
-  catatan     String?
-  dokumen     String?
+  catatan     String?  @db.Text
+  dokumen     String?  @db.Text
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
 
 model Invoice {
-  id          String   @id @default(cuid())
-  vendorId    String
-  vendor      Vendor   @relation(fields: [vendorId], references: [id])
-  nomorInvoice String  @unique
-  bulan       String   // format: YYYY-MM
-  totalAmount Float
-  status      String   @default("DRAFT") // DRAFT, SUBMITTED, VERIFIED, PAID
+  id                String    @id @default(cuid())
+  vendorId          String
+  vendor            Vendor    @relation(fields: [vendorId], references: [id])
+  nomorInvoice      String    @unique
+  bulan             String    // format: YYYY-MM
+  totalAmount       Float
+  status            String    @default("DRAFT") // DRAFT, SUBMITTED, VERIFIED, PAID
   tanggalJatuhTempo DateTime?
-  catatan     String?
-  dokumen     String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  catatan           String?   @db.Text
+  dokumen           String?   @db.Text
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 }
