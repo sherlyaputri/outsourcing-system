@@ -1,3 +1,5 @@
-import { VendorSelectionPage } from "@/components/dashboard/feature-pages";
+import { redirect } from "next/navigation";
 
-export default VendorSelectionPage;
+export default function VendorSelectionPage() {
+  redirect("/dashboard/request-os");
+}

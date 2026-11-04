@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { Prisma } from "@prisma/client";
 
 export async function GET(req: NextRequest) {
   try {
@@ -10,10 +11,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    let where: any = {};
-
+    let where: Prisma.OSRequestWhereInput = {};
     if (session.user.role === "SM") {
-      where.requesterId = session.user.id;
+      where = { requesterId: session.user.id };
+    } else if (session.user.role !== "VM") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const requests = await prisma.oSRequest.findMany({
@@ -25,7 +27,9 @@ export async function GET(req: NextRequest) {
           include: { approver: { select: { name: true, role: true } } },
           orderBy: { createdAt: "asc" },
         },
-        candidates: true,
+        candidates: {
+          select: { id: true, name: true, email: true, status: true },
+        },
       },
       orderBy: { createdAt: "desc" },
     });
@@ -45,18 +49,73 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { type, jumlah, posisi, penempatan, alasan } = body;
+    const {
+      type,
+      jumlah,
+      idMitraOs,
+      posisi,
+      penempatan,
+      waktuKerja,
+      alasan,
+    } = body;
 
     if (!type || !["PENAMBAHAN", "PERGANTIAN", "PENGURANGAN"].includes(type)) {
       return NextResponse.json({ error: "Tipe request tidak valid" }, { status: 400 });
     }
 
+    if (!Number.isInteger(jumlah) || jumlah < 1) {
+      return NextResponse.json({ error: "Jumlah harus minimal 1" }, { status: 400 });
+    }
+
+    const needsMitraId = type === "PERGANTIAN" || type === "PENGURANGAN";
+    if (needsMitraId && (!idMitraOs || !String(idMitraOs).trim())) {
+      return NextResponse.json({ error: "ID Mitra OS wajib untuk permintaan Pergantian atau Pengurangan" }, { status: 400 });
+    }
+
+    if (needsMitraId) {
+      const mitraProfile = await prisma.mitraProfile.findFirst({
+        where: {
+          idMitraOs: String(idMitraOs).trim(),
+          user: { role: "MITRA", status: "ACTIVE" },
+        },
+        select: { id: true },
+      });
+
+      if (!mitraProfile) {
+        return NextResponse.json({ error: "ID Mitra OS tidak ditemukan atau tidak aktif" }, { status: 400 });
+      }
+    }
+
+    const allowedPositions = [
+      "OS001: Sorter",
+      "OS002: Driver Delivery & Pickup",
+      "OS003: Kurir Perpaket",
+      "OS004: Kurir Dedicated",
+      "OS005: Driver Ondemand",
+    ];
+    const allowedWorkHours = ["08:00-17:00", "20:00-05:00"];
+
+    if (!allowedPositions.includes(posisi)) {
+      return NextResponse.json({ error: "Posisi kebutuhan tidak valid" }, { status: 400 });
+    }
+
+    if (!allowedWorkHours.includes(waktuKerja)) {
+      return NextResponse.json({ error: "Waktu kerja tidak valid" }, { status: 400 });
+    }
+
+    if (!["kantor1", "kantor2", "kantor3"].includes(penempatan)) {
+      return NextResponse.json({ error: "Kode kantor tidak valid" }, { status: 400 });
+    }
+
     const osRequest = await prisma.oSRequest.create({
       data: {
         type,
-        jumlah: jumlah || 1,
+        jumlah,
+        idMitraOs: needsMitraId ? String(idMitraOs).trim() : null,
+        idPergantian: type === "PERGANTIAN" ? String(idMitraOs).trim() : null,
         posisi,
         penempatan,
+        waktuKerja,
         alasan,
         requesterId: session.user.id,
         status: "PENDING",

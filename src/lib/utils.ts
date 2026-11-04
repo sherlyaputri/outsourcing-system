@@ -56,6 +56,9 @@ export function getStatusColor(status: string): string {
     TERPILIH: 'bg-green-100 text-green-800',
     DITOLAK: 'bg-red-100 text-red-800',
     REPLACED: 'bg-orange-100 text-orange-800',
+    OS_WAITING_GM: 'bg-yellow-100 text-yellow-800',
+    OS_WAITING_COO: 'bg-yellow-100 text-yellow-800',
+    OS_WAITING_ACTIVATION: 'bg-blue-100 text-blue-800',
   };
   return colors[status] || 'bg-gray-100 text-gray-800';
 }
@@ -85,6 +88,9 @@ export function getStatusLabel(status: string): string {
     TERPILIH: 'Terpilih',
     DITOLAK: 'Ditolak',
     REPLACED: 'Diganti',
+    OS_WAITING_GM: 'Menunggu Approval GM',
+    OS_WAITING_COO: 'Menunggu Approval COO',
+    OS_WAITING_ACTIVATION: 'Menunggu Aktivasi Akun',
     PENAMBAHAN: 'Penambahan',
     PERGANTIAN: 'Pergantian',
     PENGURANGAN: 'Pengurangan',

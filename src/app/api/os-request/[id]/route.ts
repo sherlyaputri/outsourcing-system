@@ -11,7 +11,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
 
     const body = await req.json();
-    const { action, vendorId, status, catatan } = body;
+    const { action, vendorId } = body;
 
     const osRequest = await prisma.oSRequest.findUnique({
       where: { id: params.id },
@@ -24,18 +24,25 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
     // VM selects vendor
     if (action === "SELECT_VENDOR" && session.user.role === "VM") {
-      const updated = await prisma.oSRequest.update({
-        where: { id: params.id },
-        data: { vendorId, status: "VENDOR_SELECTED" },
-      });
-      return NextResponse.json(updated);
-    }
+      if (osRequest.status !== "APPROVED_COO" || !vendorId) {
+        return NextResponse.json({ error: "Request belum siap dipilihkan vendor" }, { status: 400 });
+      }
 
-    // Update status
-    if (status) {
+      const vendor = await prisma.vendor.findFirst({
+        where: { id: vendorId, status: "ACTIVE" },
+        select: { id: true },
+      });
+
+      if (!vendor) {
+        return NextResponse.json({ error: "Vendor tidak ditemukan atau tidak aktif" }, { status: 400 });
+      }
+
       const updated = await prisma.oSRequest.update({
         where: { id: params.id },
-        data: { status, catatan },
+        data: {
+          vendorId,
+          status: osRequest.type === "PENGURANGAN" ? "COMPLETED" : "VENDOR_SELECTED",
+        },
       });
       return NextResponse.json(updated);
     }
