@@ -14,7 +14,6 @@ import {
   Receipt,
   Camera,
   History,
-  UserPlus,
   CheckCircle,
   LogOut,
   Menu,
@@ -50,11 +49,11 @@ function getNavItems(role: string): NavItem[] {
     case "VENDOR":
       return [
         dashboardItem,
+        { label: "Request OS", href: "/dashboard/request-os", icon: <FileText size={20} /> },
         { label: "Data Mitra OS", href: "/dashboard/mitra", icon: <Users size={20} /> },
         { label: "Riwayat Absensi", href: "/dashboard/riwayat-absensi", icon: <History size={20} /> },
         { label: "Daftar Klaim", href: "/dashboard/klaim", icon: <ClipboardList size={20} /> },
         { label: "Invoice", href: "/dashboard/invoice", icon: <Receipt size={20} /> },
-        { label: "Ajukan Akun Mitra", href: "/dashboard/akun-mitra", icon: <UserPlus size={20} /> },
       ];
     case "VM":
       return [

@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { randomUUID } from "node:crypto";
 
 export async function GET(req: NextRequest) {
   try {
@@ -12,7 +13,13 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    let where: Prisma.AccountRequestWhereInput = { status: "PENDING" };
+    let where: Prisma.AccountRequestWhereInput = {
+      status: "PENDING",
+      OR: [
+        { candidate: null },
+        { candidate: { is: { status: "TERPILIH" } } },
+      ],
+    };
     const candidateSelect = session.user.role === "VM"
       ? {
           id: true,
@@ -21,6 +28,11 @@ export async function GET(req: NextRequest) {
           jenisSim: true,
           noSim: true,
           fotoSim: true,
+          alamat: true,
+          kelurahan: true,
+          kecamatan: true,
+          kabKota: true,
+          provinsi: true,
           osRequest: { select: { id: true, type: true, jumlah: true, posisi: true, penempatan: true, waktuKerja: true } },
         }
       : { id: true, osRequest: { select: { id: true, type: true, jumlah: true } } };
@@ -53,27 +65,36 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { name, email, phone } = body;
-
-    // Check if email already exists
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) {
-      return NextResponse.json({ error: "Email sudah terdaftar" }, { status: 400 });
+    const { action, osRequestId } = body;
+    if (action !== "REQUEST_CANDIDATE_ACCOUNTS" || typeof osRequestId !== "string" || !session.user.vendorId) {
+      return NextResponse.json({ error: "Request akun harus berasal dari kandidat pada Request OS." }, { status: 400 });
     }
 
-    const request = await prisma.accountRequest.create({
-      data: {
-        type: "MITRA",
-        name,
-        email,
-        phone,
-        vendorId: session.user.vendorId,
-        requesterId: session.user.id,
-        status: "PENDING",
-      },
+    const requestedCount = await prisma.$transaction(async (tx) => {
+      const osRequest = await tx.oSRequest.findFirst({
+        where: {
+          id: osRequestId,
+          vendorId: session.user.vendorId,
+          status: "WAITING_ACTIVATION",
+        },
+        select: { id: true },
+      });
+      if (!osRequest) return 0;
+
+      return (await tx.accountRequest.updateMany({
+        where: {
+          requesterId: session.user.id,
+          status: "WAITING_SELECTION",
+          candidate: { is: { osRequestId, status: "TERPILIH" } },
+        },
+        data: { status: "PENDING" },
+      })).count;
     });
 
-    return NextResponse.json(request);
+    if (requestedCount === 0) {
+      return NextResponse.json({ error: "Belum ada kandidat yang lolos seleksi dan siap diajukan." }, { status: 409 });
+    }
+    return NextResponse.json({ count: requestedCount });
   } catch (error) {
     console.error("Account Request POST error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
@@ -110,6 +131,9 @@ export async function PATCH(req: NextRequest) {
     if (accountReq.status !== "PENDING") {
       return NextResponse.json({ error: "Pengajuan ini sudah diproses" }, { status: 409 });
     }
+    if (accountReq.candidate && accountReq.candidate.status !== "TERPILIH") {
+      return NextResponse.json({ error: "Kandidat belum lolos seleksi SM." }, { status: 409 });
+    }
 
     if (status === "APPROVED") {
       const hashedPassword = await bcrypt.hash("mitra123", 10);
@@ -139,29 +163,50 @@ export async function PATCH(req: NextRequest) {
             data: {
               userId: user.id,
               vendorId: accountReq.vendorId,
+              idMitraOs: `MOS-${randomUUID().toUpperCase()}`,
               nik: accountReq.candidate.nik,
               fotoKtp: accountReq.candidate.fotoKtp,
+              jenisSim: accountReq.candidate.jenisSim,
+              noSim: accountReq.candidate.noSim,
+              fotoSim: accountReq.candidate.fotoSim,
+              alamat: accountReq.candidate.alamat,
+              kelurahan: accountReq.candidate.kelurahan,
+              kecamatan: accountReq.candidate.kecamatan,
+              kabKota: accountReq.candidate.kabKota,
+              provinsi: accountReq.candidate.provinsi,
               posisi: accountReq.candidate.osRequest.posisi,
               penempatan: accountReq.candidate.osRequest.penempatan,
             },
           });
           await tx.candidate.update({
             where: { id: accountReq.candidate.id },
-            data: { status: "TERPILIH" },
+            data: { status: "ACTIVATED" },
           });
 
-          const activatedCount = await tx.candidate.count({
-            where: {
-              osRequestId: accountReq.candidate.osRequestId,
-              status: "TERPILIH",
+          const updatedRequest = await tx.accountRequest.update({
+            where: { id: requestId },
+            data: {
+              status: "ACTIVATED",
+              catatan,
+              handlerId: session.user.id,
             },
           });
-          if (activatedCount >= accountReq.candidate.osRequest.jumlah) {
+          const pendingCount = await tx.accountRequest.count({
+            where: {
+              status: "PENDING",
+              candidate: { is: { osRequestId: accountReq.candidate.osRequestId } },
+            },
+          });
+          if (pendingCount === 0) {
+            const activatedCount = await tx.candidate.count({
+              where: { osRequestId: accountReq.candidate.osRequestId, status: "ACTIVATED" },
+            });
             await tx.oSRequest.update({
               where: { id: accountReq.candidate.osRequestId },
-              data: { status: "COMPLETED" },
+              data: { status: activatedCount > 0 ? "COMPLETED" : "NOT_SELECTED" },
             });
           }
+          return updatedRequest;
         }
 
         return tx.accountRequest.update({
@@ -184,7 +229,7 @@ export async function PATCH(req: NextRequest) {
           data: { status: "DITOLAK" },
         });
       }
-      return tx.accountRequest.update({
+      const updatedRequest = await tx.accountRequest.update({
         where: { id: requestId },
         data: {
           status: "REJECTED",
@@ -192,6 +237,24 @@ export async function PATCH(req: NextRequest) {
           handlerId: session.user.id,
         },
       });
+      if (accountReq.candidate) {
+        const pendingCount = await tx.accountRequest.count({
+          where: {
+            status: "PENDING",
+            candidate: { is: { osRequestId: accountReq.candidate.osRequestId } },
+          },
+        });
+        if (pendingCount === 0) {
+          const activatedCount = await tx.candidate.count({
+            where: { osRequestId: accountReq.candidate.osRequestId, status: "ACTIVATED" },
+          });
+          await tx.oSRequest.update({
+            where: { id: accountReq.candidate.osRequestId },
+            data: { status: activatedCount > 0 ? "COMPLETED" : "NOT_SELECTED" },
+          });
+        }
+      }
+      return updatedRequest;
     });
 
     return NextResponse.json(result);

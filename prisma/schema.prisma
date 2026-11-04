@@ -59,10 +59,17 @@ model MitraProfile {
   tempatLahir    String?
   tanggalLahir   DateTime?
   alamat         String?   @db.Text
+  kelurahan      String?
+  kecamatan      String?
+  kabKota        String?
+  provinsi       String?
   noBpjs         String?
   noRekening     String?
   namaBank       String?
   fotoKtp        String?   @db.LongText
+  jenisSim       String?
+  noSim          String?
+  fotoSim        String?   @db.LongText
   fotoSelfie     String?   @db.LongText
   faceDescriptor String?   @db.Text
   penempatan     String?
@@ -96,7 +103,7 @@ model Attendance {
 model OSRequest {
   id           String   @id @default(cuid())
   type         String // PENAMBAHAN, PERGANTIAN, PENGURANGAN
-  status       String   @default("PENDING") // PENDING, APPROVED_GM, APPROVED_COO, VENDOR_SELECTED, IN_PROGRESS, COMPLETED, REJECTED
+  status       String   @default("PENDING") // PENDING, APPROVED_GM, APPROVED_COO, VENDOR_SELECTED, WAITING_SELECTION, WAITING_ACTIVATION, NOT_SELECTED, COMPLETED, REJECTED
   requesterId  String
   requester    User     @relation("OSRequestCreator", fields: [requesterId], references: [id])
   vendorId     String?
@@ -143,9 +150,16 @@ model Candidate {
   fotoSim          String?         @db.LongText
   phone            String?
   email            String?
+  alamat           String?         @db.Text
+  kelurahan        String?
+  kecamatan        String?
+  kabKota          String?
+  provinsi         String?
+  namaBank         String?
+  noRekening       String?
   accountRequestId String?         @unique
   accountRequest   AccountRequest? @relation(fields: [accountRequestId], references: [id])
-  status           String          @default("KANDIDAT") // KANDIDAT, TERPILIH, DITOLAK
+  status           String          @default("KANDIDAT") // KANDIDAT, TERPILIH, DITOLAK, ACTIVATED
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 }
@@ -161,7 +175,7 @@ model AccountRequest {
   requester   User       @relation("AccountRequestCreator", fields: [requesterId], references: [id])
   handlerId   String?
   handler     User?      @relation("AccountRequestHandler", fields: [handlerId], references: [id])
-  status      String     @default("PENDING") // PENDING, APPROVED, REJECTED, ACTIVATED
+  status      String     @default("PENDING") // WAITING_SELECTION, PENDING, APPROVED, REJECTED, ACTIVATED
   catatan     String?    @db.Text
   candidate   Candidate?
   createdAt   DateTime   @default(now())
@@ -194,7 +208,8 @@ model Invoice {
   status            String    @default("DRAFT") // DRAFT, SUBMITTED, VERIFIED, PAID
   tanggalJatuhTempo DateTime?
   catatan           String?   @db.Text
-  dokumen           String?   @db.Text
+  dokumen           String?   @db.LongText
+  dokumenNama       String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 }

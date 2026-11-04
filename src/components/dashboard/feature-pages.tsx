@@ -33,7 +33,37 @@ interface Mitra {
     idMitraOs?: string | null;
     posisi?: string | null;
     penempatan?: string | null;
+    alamat?: string | null;
+    kelurahan?: string | null;
+    kecamatan?: string | null;
+    kabKota?: string | null;
+    provinsi?: string | null;
+    fotoKtp?: string | null;
+    jenisSim?: string | null;
+    noSim?: string | null;
+    fotoSim?: string | null;
+    namaBank?: string | null;
+    noRekening?: string | null;
   } | null;
+}
+
+interface OSCandidate {
+  id: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  nik?: string | null;
+  fotoKtp?: string | null;
+  jenisSim?: string | null;
+  noSim?: string | null;
+  fotoSim?: string | null;
+  alamat?: string | null;
+  kelurahan?: string | null;
+  kecamatan?: string | null;
+  kabKota?: string | null;
+  provinsi?: string | null;
+  status: string;
+  accountRequest?: { status: string } | null;
 }
 
 interface AccountRequest {
@@ -52,8 +82,34 @@ interface AccountRequest {
     jenisSim?: string | null;
     noSim?: string | null;
     fotoSim?: string | null;
+    alamat?: string | null;
+    kelurahan?: string | null;
+    kecamatan?: string | null;
+    kabKota?: string | null;
+    provinsi?: string | null;
     osRequest: { id: string; type: string; jumlah: number; posisi?: string | null; penempatan?: string | null; waktuKerja?: string | null };
   } | null;
+}
+
+interface CandidateDraft {
+  name: string;
+  nik: string;
+  fotoKtp: File | null;
+  jenisSim: string;
+  noSim: string;
+  fotoSim: File | null;
+  phone: string;
+  email: string;
+  alamat: string;
+  kelurahan: string;
+  kecamatan: string;
+  kabKota: string;
+  provinsi: string;
+}
+
+interface Region {
+  id: string;
+  name: string;
 }
 
 interface Claim {
@@ -74,6 +130,8 @@ interface Invoice {
   bulan: string;
   totalAmount: number;
   status: string;
+  hasDokumen: boolean;
+  dokumenNama?: string | null;
   tanggalJatuhTempo?: string | null;
   vendor?: { name: string };
 }
@@ -92,6 +150,7 @@ interface OSRequest {
   vendorId?: string | null;
   requester?: { name: string; role: string };
   vendor?: { name: string } | null;
+  candidates?: OSCandidate[];
 }
 
 function getOSRequestStatus(status: string) {
@@ -99,8 +158,11 @@ function getOSRequestStatus(status: string) {
     PENDING: "OS_WAITING_GM",
     APPROVED_GM: "OS_WAITING_COO",
     APPROVED_COO: "OS_WAITING_ACTIVATION",
-    VENDOR_SELECTED: "OS_WAITING_ACTIVATION",
-    IN_PROGRESS: "OS_WAITING_ACTIVATION",
+    VENDOR_SELECTED: "OS_WAITING_VENDOR_DATA",
+    IN_PROGRESS: "OS_WAITING_SELECTION",
+    WAITING_SELECTION: "OS_WAITING_SELECTION",
+    WAITING_ACTIVATION: "OS_WAITING_ACTIVATION",
+    NOT_SELECTED: "OS_NOT_SELECTED",
   };
   return statuses[status] || status;
 }
@@ -235,20 +297,33 @@ export function MitraManagementPage() {
       <Card><CardContent className="p-0">
         <LoadingError loading={mitras.loading} error={mitras.error} empty={!mitras.data.length} />
         {!mitras.loading && !mitras.error && mitras.data.length > 0 && (
-          <DataTable headers={["ID Mitra OS", "Nama", "Email", "Vendor", "Posisi", "Penempatan", "Status"]}>
+          <DataTable headers={["ID Mitra OS", "Nama", "Email", "Vendor", "Posisi", "Penempatan", "Detail Data", "Status"]}>
             {mitras.data.map((mitra) => (
               <TableRow key={mitra.id}>
                 <TableCell>
-                  {session?.user.role === "VENDOR" ? (
-                    <MitraIdEditor mitra={mitra} onSaved={mitras.reload} />
-                  ) : (
-                    mitra.mitraProfile?.idMitraOs || "-"
-                  )}
+                  {mitra.mitraProfile?.idMitraOs || "-"}
                 </TableCell>
                 <TableCell>{mitra.name}</TableCell><TableCell>{mitra.email}</TableCell>
                 <TableCell>{mitra.vendor?.name || "-"}</TableCell>
                 <TableCell>{mitra.mitraProfile?.posisi || "-"}</TableCell>
                 <TableCell>{mitra.mitraProfile?.penempatan || "-"}</TableCell>
+                <TableCell>
+                  {session?.user.role === "VENDOR" && mitra.mitraProfile && (
+                    <details>
+                      <summary className="cursor-pointer text-primary">Lihat</summary>
+                      <div className="mt-2 min-w-56 space-y-1 text-xs">
+                        <p>Alamat: {mitra.mitraProfile.alamat || "-"}, {mitra.mitraProfile.kelurahan || "-"}, {mitra.mitraProfile.kecamatan || "-"}, {mitra.mitraProfile.kabKota || "-"}, {mitra.mitraProfile.provinsi || "-"}</p>
+                        <p>SIM: {mitra.mitraProfile.jenisSim || "-"} · {mitra.mitraProfile.noSim || "-"}</p>
+                        <p>Bank: {mitra.mitraProfile.namaBank || "-"} · Rekening: {mitra.mitraProfile.noRekening || "-"}</p>
+                        <div className="flex gap-2">
+                          {mitra.mitraProfile.fotoKtp && <img className="h-20 rounded border object-contain" src={mitra.mitraProfile.fotoKtp} alt="Foto KTP" />}
+                          {mitra.mitraProfile.fotoSim && <img className="h-20 rounded border object-contain" src={mitra.mitraProfile.fotoSim} alt="Foto SIM" />}
+                        </div>
+                      </div>
+                    </details>
+                  )}
+                  {session?.user.role !== "VENDOR" && "-"}
+                </TableCell>
                 <TableCell><StatusBadge status={mitra.status} /></TableCell>
               </TableRow>
             ))}
@@ -256,41 +331,6 @@ export function MitraManagementPage() {
         )}
       </CardContent></Card>
     </FeaturePage>
-  );
-}
-
-function MitraIdEditor({ mitra, onSaved }: { mitra: Mitra; onSaved: () => void }) {
-  const [idMitraOs, setIdMitraOs] = useState(mitra.mitraProfile?.idMitraOs || "");
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  async function save() {
-    setError(null);
-    setSaving(true);
-    try {
-      await sendJson("/api/mitra", "PUT", { userId: mitra.id, idMitraOs });
-      onSaved();
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "Gagal menyimpan ID Mitra OS.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="min-w-40 space-y-1">
-      <input
-        className={fieldClass}
-        value={idMitraOs}
-        onChange={(event) => setIdMitraOs(event.target.value)}
-        aria-label={`ID Mitra OS untuk ${mitra.name}`}
-        placeholder="Contoh: 123"
-      />
-      <button type="button" disabled={saving} className="text-xs font-medium text-primary underline disabled:opacity-50" onClick={save}>
-        {saving ? "Menyimpan..." : "Simpan ID"}
-      </button>
-      {error && <span role="alert" className="text-xs text-red-600">{error}</span>}
-    </div>
   );
 }
 
@@ -369,6 +409,351 @@ function MitraIdPicker({
   );
 }
 
+function emptyCandidate(): CandidateDraft {
+  return {
+    name: "",
+    nik: "",
+    fotoKtp: null,
+    jenisSim: "",
+    noSim: "",
+    fotoSim: null,
+    phone: "",
+    email: "",
+    alamat: "",
+    kelurahan: "",
+    kecamatan: "",
+    kabKota: "",
+    provinsi: "",
+  };
+}
+
+function readImage(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") resolve(reader.result);
+      else reject(new Error("Foto gagal dibaca."));
+    };
+    reader.onerror = () => reject(new Error("Foto gagal dibaca."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function RegionPicker({
+  value,
+  onChange,
+}: {
+  value: Pick<CandidateDraft, "provinsi" | "kabKota" | "kecamatan" | "kelurahan">;
+  onChange: (field: keyof CandidateDraft, regionName: string) => void;
+}) {
+  const [provinces, setProvinces] = useState<Region[]>([]);
+  const [regencies, setRegencies] = useState<Region[]>([]);
+  const [districts, setDistricts] = useState<Region[]>([]);
+  const [villages, setVillages] = useState<Region[]>([]);
+  const [provinceId, setProvinceId] = useState("");
+  const [regencyId, setRegencyId] = useState("");
+  const [districtId, setDistrictId] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    fetch("/api/region?level=provinces")
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Data provinsi gagal dimuat.");
+        return result as Region[];
+      })
+      .then((result) => { if (active) setProvinces(result); })
+      .catch((loadError) => { if (active) setError(loadError instanceof Error ? loadError.message : "Data wilayah gagal dimuat."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    if (!provinceId) {
+      setRegencies([]);
+      return;
+    }
+    let active = true;
+    setLoading(true);
+    fetch(`/api/region?level=regencies&parentId=${provinceId}`)
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Data kabupaten/kota gagal dimuat.");
+        return result as Region[];
+      })
+      .then((result) => { if (active) { setRegencies(result); setError(null); } })
+      .catch((loadError) => { if (active) setError(loadError instanceof Error ? loadError.message : "Data wilayah gagal dimuat."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [provinceId]);
+
+  useEffect(() => {
+    if (!regencyId) {
+      setDistricts([]);
+      return;
+    }
+    let active = true;
+    setLoading(true);
+    fetch(`/api/region?level=districts&parentId=${regencyId}`)
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Data kecamatan gagal dimuat.");
+        return result as Region[];
+      })
+      .then((result) => { if (active) { setDistricts(result); setError(null); } })
+      .catch((loadError) => { if (active) setError(loadError instanceof Error ? loadError.message : "Data wilayah gagal dimuat."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [regencyId]);
+
+  useEffect(() => {
+    if (!districtId) {
+      setVillages([]);
+      return;
+    }
+    let active = true;
+    setLoading(true);
+    fetch(`/api/region?level=villages&parentId=${districtId}`)
+      .then(async (response) => {
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Data kelurahan/desa gagal dimuat.");
+        return result as Region[];
+      })
+      .then((result) => { if (active) { setVillages(result); setError(null); } })
+      .catch((loadError) => { if (active) setError(loadError instanceof Error ? loadError.message : "Data wilayah gagal dimuat."); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [districtId]);
+
+  return (
+    <div className="space-y-4 md:col-span-2">
+      <label className="block space-y-1 text-sm">Kelurahan/Desa
+        <select
+          className={fieldClass}
+          required
+          disabled={!districtId || loading}
+          value={villages.find((region) => region.name === value.kelurahan)?.id || ""}
+          onChange={(event) => {
+            const selected = villages.find((region) => region.id === event.target.value);
+            onChange("kelurahan", selected?.name || "");
+          }}
+        >
+          <option value="">Pilih kelurahan/desa</option>
+          {villages.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}
+        </select>
+      </label>
+      <label className="block space-y-1 text-sm">Kecamatan
+        <select
+          className={fieldClass}
+          value={districtId}
+          required
+          disabled={!regencyId || loading}
+          onChange={(event) => {
+            const selected = districts.find((region) => region.id === event.target.value);
+            setDistrictId(event.target.value);
+            onChange("kecamatan", selected?.name || "");
+            onChange("kelurahan", "");
+          }}
+        >
+          <option value="">Pilih kecamatan</option>
+          {districts.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}
+        </select>
+      </label>
+      <label className="block space-y-1 text-sm">Kab/Kota
+        <select
+          className={fieldClass}
+          value={regencyId}
+          required
+          disabled={!provinceId || loading}
+          onChange={(event) => {
+            const selected = regencies.find((region) => region.id === event.target.value);
+            setRegencyId(event.target.value);
+            setDistrictId("");
+            onChange("kabKota", selected?.name || "");
+            onChange("kecamatan", "");
+            onChange("kelurahan", "");
+          }}
+        >
+          <option value="">Pilih kabupaten/kota</option>
+          {regencies.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}
+        </select>
+      </label>
+      <label className="block space-y-1 text-sm">Provinsi
+        <select
+          className={fieldClass}
+          value={provinceId}
+          required
+          disabled={loading && provinces.length === 0}
+          onChange={(event) => {
+            const selected = provinces.find((region) => region.id === event.target.value);
+            setProvinceId(event.target.value);
+            setRegencyId("");
+            setDistrictId("");
+            onChange("provinsi", selected?.name || "");
+            onChange("kabKota", "");
+            onChange("kecamatan", "");
+            onChange("kelurahan", "");
+          }}
+        >
+          <option value="">Pilih provinsi (pilih pertama)</option>
+          {provinces.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}
+        </select>
+      </label>
+      <p className="text-xs text-muted-foreground">Pilih wilayah dari bawah ke atas: provinsi, kabupaten/kota, kecamatan, lalu kelurahan/desa.</p>
+      <FormError error={error} />
+    </div>
+  );
+}
+
+function CandidateFields({
+  candidate,
+  index,
+  update,
+}: {
+  candidate: CandidateDraft;
+  index: number;
+  update: (index: number, field: keyof CandidateDraft, value: string | File | null) => void;
+}) {
+  return (
+    <fieldset className="grid gap-4 rounded-md border p-4 md:grid-cols-2">
+      <legend className="px-1 text-sm font-medium">Data kandidat {index + 1}</legend>
+      <label className="space-y-1 text-sm">Nama Mitra
+        <input className={fieldClass} value={candidate.name} onChange={(event) => update(index, "name", event.target.value)} required />
+      </label>
+      <label className="space-y-1 text-sm">NIK KTP (16 digit angka)
+        <input className={fieldClass} type="text" inputMode="numeric" pattern="[0-9]{16}" maxLength={16} value={candidate.nik} onChange={(event) => update(index, "nik", event.target.value.replace(/\D/g, "").slice(0, 16))} required />
+      </label>
+      <label className="space-y-1 text-sm">Foto KTP (JPG/PNG, maks. 5 MB)
+        <input className={fieldClass} type="file" accept="image/jpeg,image/png" onChange={(event) => update(index, "fotoKtp", event.target.files?.[0] || null)} required />
+      </label>
+      <label className="space-y-1 text-sm">Jenis SIM
+        <select className={fieldClass} value={candidate.jenisSim} onChange={(event) => update(index, "jenisSim", event.target.value)} required>
+          <option value="">Pilih jenis SIM</option>
+          {["A", "B1", "B2", "C", "D"].map((kind) => <option key={kind} value={kind}>SIM {kind}</option>)}
+        </select>
+      </label>
+      <label className="space-y-1 text-sm">No. SIM (hanya angka)
+        <input className={fieldClass} type="text" inputMode="numeric" value={candidate.noSim} onChange={(event) => update(index, "noSim", event.target.value.replace(/\D/g, ""))} required />
+      </label>
+      <label className="space-y-1 text-sm">Foto SIM (JPG/PNG, maks. 5 MB)
+        <input className={fieldClass} type="file" accept="image/jpeg,image/png" onChange={(event) => update(index, "fotoSim", event.target.files?.[0] || null)} required />
+      </label>
+      <label className="space-y-1 text-sm">No. HP (hanya angka: 08xxxxxxxxxxxx)
+        <input className={fieldClass} type="text" inputMode="numeric" pattern="08[0-9]{8,12}" maxLength={14} placeholder="08xxxxxxxxxxxx" value={candidate.phone} onChange={(event) => update(index, "phone", event.target.value.replace(/\D/g, "").slice(0, 14))} required />
+      </label>
+      <label className="space-y-1 text-sm">Email (format: nama@domain.com)
+        <input className={fieldClass} type="email" placeholder="nama@domain.com" value={candidate.email} onChange={(event) => update(index, "email", event.target.value)} required />
+      </label>
+      <label className="space-y-1 text-sm md:col-span-2">Alamat tempat tinggal
+        <input className={fieldClass} value={candidate.alamat} onChange={(event) => update(index, "alamat", event.target.value)} required />
+      </label>
+      <RegionPicker
+        value={{
+          provinsi: candidate.provinsi,
+          kabKota: candidate.kabKota,
+          kecamatan: candidate.kecamatan,
+          kelurahan: candidate.kelurahan,
+        }}
+        onChange={(field, value) => update(index, field, value)}
+      />
+    </fieldset>
+  );
+}
+
+function VendorCandidateForm({
+  request,
+  onSubmitted,
+  onClose,
+}: {
+  request: OSRequest;
+  onSubmitted: () => void;
+  onClose: () => void;
+}) {
+  const [candidates, setCandidates] = useState<CandidateDraft[]>(
+    () => Array.from({ length: request.jumlah }, () => emptyCandidate()),
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  function updateCandidate(index: number, field: keyof CandidateDraft, value: string | File | null) {
+    setCandidates((current) => current.map((candidate, candidateIndex) => (
+      candidateIndex === index ? { ...candidate, [field]: value } : candidate
+    )));
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    if (candidates.length !== request.jumlah) {
+      setError(`Jumlah kandidat harus tepat ${request.jumlah} orang.`);
+      return;
+    }
+    if (!window.confirm(`Anda akan submit ${request.jumlah} kandidat. Lanjutkan?`)) return;
+    setSaving(true);
+    try {
+      for (const candidate of candidates) {
+        if (!candidate.fotoKtp || !candidate.fotoSim) {
+          throw new Error("Foto KTP dan SIM wajib diunggah untuk setiap kandidat.");
+        }
+        if (candidate.fotoKtp.size > 5 * 1024 * 1024 || candidate.fotoSim.size > 5 * 1024 * 1024) {
+          throw new Error("Ukuran setiap foto maksimal 5 MB.");
+        }
+      }
+
+      const payload = await Promise.all(candidates.map(async (candidate) => ({
+        ...candidate,
+        fotoKtp: await readImage(candidate.fotoKtp!),
+        fotoSim: await readImage(candidate.fotoSim!),
+      })));
+      await sendJson("/api/candidate", "POST", { osRequestId: request.id, candidates: payload });
+      onSubmitted();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "Gagal mengirim data kandidat.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (request.status !== "VENDOR_SELECTED") return null;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-lg">Data kandidat untuk Request OS</CardTitle>
+        <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+          <p>Jenis Permintaan: <strong>{request.type}</strong></p>
+          {request.type === "PERGANTIAN" && <p>ID Pergantian: <strong>{request.idMitraOs || request.idPergantian || "-"}</strong></p>}
+          <p>Posisi Kebutuhan: <strong>{request.posisi || "-"}</strong></p>
+          <p>Wilayah Operasional: <strong>{request.penempatan || "-"}</strong></p>
+          <p>Waktu Kerja: <strong>{request.waktuKerja || "-"}</strong></p>
+          <p>Jumlah Kebutuhan: <strong>{request.jumlah}</strong></p>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={submit} className="space-y-6">
+          {candidates.map((candidate, index) => (
+            <div key={index}>
+              <CandidateFields candidate={candidate} index={index} update={updateCandidate} />
+            </div>
+          ))}
+          <p className="text-sm font-medium">Jumlah kandidat yang akan dikirim: {request.jumlah}</p>
+              <p className="text-xs text-muted-foreground">
+                Foto harus JPG/PNG, maks. 5 MB per berkas dan 15 MB total per pengiriman. Email hanya diperiksa format dan duplikasinya.
+          </p>
+          <FormError error={error} />
+          <div className="flex flex-wrap justify-between gap-2">
+            <Button type="button" variant="outline" disabled={saving} onClick={onClose}>Tutup</Button>
+            <Button type="submit" disabled={saving}>{saving ? "Mengirim..." : "Submit"}</Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
+  );
+}
+
 export function AccountApprovalPage() {
   const requests = useApiData<AccountRequest[]>("/api/account-request", []);
   const [error, setError] = useState<string | null>(null);
@@ -388,7 +773,7 @@ export function AccountApprovalPage() {
   }
 
   return (
-    <FeaturePage title="Approval Akun" description="Tinjau permintaan pembuatan akun mitra dari vendor." roles={["VM"]}>
+    <FeaturePage title="Aktivasi Akun" description="Aktifkan akun kandidat yang telah lolos seleksi SM." roles={["VM"]}>
       <FormError error={error} />
       <Card><CardContent className="p-0">
         <LoadingError loading={requests.loading} error={requests.error} empty={!requests.data.some((item) => item.status === "PENDING")} />
@@ -404,6 +789,7 @@ export function AccountApprovalPage() {
                       <div className="mt-2 space-y-2">
                         <p>NIK: {item.candidate.nik || "-"}</p>
                         <p>SIM: {item.candidate.jenisSim || "-"} · {item.candidate.noSim || "-"}</p>
+                        <p>Alamat: {item.candidate.alamat || "-"}, {item.candidate.kelurahan || "-"}, {item.candidate.kecamatan || "-"}, {item.candidate.kabKota || "-"}, {item.candidate.provinsi || "-"}</p>
                         <p>Posisi: {item.candidate.osRequest.posisi || "-"} · Wilayah: {item.candidate.osRequest.penempatan || "-"} · Waktu: {item.candidate.osRequest.waktuKerja || "-"}</p>
                         <div className="flex gap-3">
                           {item.candidate.fotoKtp && <img className="h-24 rounded border object-contain" src={item.candidate.fotoKtp} alt="Foto KTP kandidat" />}
@@ -417,7 +803,7 @@ export function AccountApprovalPage() {
                 <TableCell>{item.candidate ? `${item.candidate.osRequest.type} · ${item.candidate.osRequest.jumlah} orang` : "-"}</TableCell>
                 <TableCell><StatusBadge status={item.status} /></TableCell>
                 <TableCell className="space-x-2">
-                  <Button disabled={busyId === item.id} onClick={() => decide(item.id, "APPROVED")}>Setujui</Button>
+                  <Button disabled={busyId === item.id} onClick={() => decide(item.id, "APPROVED")}>Aktivasi Akun</Button>
                   <Button variant="outline" disabled={busyId === item.id} onClick={() => decide(item.id, "REJECTED")}>Tolak</Button>
                 </TableCell>
               </TableRow>
@@ -525,6 +911,18 @@ export function InvoicesPage() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  async function readInvoiceDocument(file: File) {
+    return new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === "string") resolve(reader.result);
+        else reject(new Error("File invoice gagal dibaca."));
+      };
+      reader.onerror = () => reject(new Error("File invoice gagal dibaca."));
+      reader.readAsDataURL(file);
+    });
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -532,11 +930,24 @@ export function InvoicesPage() {
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
     try {
+      const file = form.get("dokumen");
+      if (!(file instanceof File) || file.size === 0) {
+        throw new Error("Pilih file invoice untuk diunggah.");
+      }
+      if (!["application/pdf", "image/jpeg", "image/png"].includes(file.type)) {
+        throw new Error("File invoice harus berupa PDF, JPG, atau PNG.");
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        throw new Error("Ukuran file invoice maksimal 5 MB.");
+      }
+
       await sendJson("/api/invoice", "POST", {
         bulan: form.get("bulan"),
         totalAmount: Number(form.get("totalAmount")),
         tanggalJatuhTempo: form.get("tanggalJatuhTempo") || undefined,
         catatan: form.get("catatan"),
+        dokumen: await readInvoiceDocument(file),
+        dokumenNama: file.name,
       });
       formElement.reset();
       invoices.reload();
@@ -556,65 +967,17 @@ export function InvoicesPage() {
             <label className="space-y-1 text-sm">Total tagihan<input className={fieldClass} type="number" min="0" step="any" name="totalAmount" required /></label>
             <label className="space-y-1 text-sm">Jatuh tempo<input className={fieldClass} type="date" name="tanggalJatuhTempo" /></label>
             <label className="space-y-1 text-sm">Catatan<input className={fieldClass} name="catatan" /></label>
+            <label className="space-y-1 text-sm md:col-span-2">File invoice (PDF/JPG/PNG, maks. 5 MB)<input className={fieldClass} type="file" name="dokumen" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required /></label>
             <FormError error={error} />
-            <Button type="submit" disabled={saving}>{saving ? "Mengirim..." : "Kirim Invoice"}</Button>
+            <Button type="submit" disabled={saving}>{saving ? "Mengunggah..." : "Upload Invoice"}</Button>
           </form>
         </CardContent></Card>
       )}
       <Card><CardContent className="p-0">
         <LoadingError loading={invoices.loading} error={invoices.error} empty={!invoices.data.length} />
         {!invoices.loading && !invoices.error && invoices.data.length > 0 && (
-          <DataTable headers={["Nomor", "Bulan", "Vendor", "Total", "Jatuh Tempo", "Status"]}>
-            {invoices.data.map((item) => <TableRow key={item.id}><TableCell>{item.nomorInvoice}</TableCell><TableCell>{item.bulan}</TableCell><TableCell>{item.vendor?.name || "-"}</TableCell><TableCell>{item.totalAmount.toLocaleString("id-ID")}</TableCell><TableCell>{item.tanggalJatuhTempo ? new Date(item.tanggalJatuhTempo).toLocaleDateString("id-ID") : "-"}</TableCell><TableCell><StatusBadge status={item.status} /></TableCell></TableRow>)}
-          </DataTable>
-        )}
-      </CardContent></Card>
-    </FeaturePage>
-  );
-}
-
-export function AccountRequestPage() {
-  const requests = useApiData<AccountRequest[]>("/api/account-request", []);
-  const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setSaving(true);
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
-    try {
-      await sendJson("/api/account-request", "POST", {
-        name: form.get("name"),
-        email: form.get("email"),
-        phone: form.get("phone"),
-      });
-      formElement.reset();
-      requests.reload();
-    } catch (submitError) {
-      setError(submitError instanceof Error ? submitError.message : "Gagal mengajukan akun.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <FeaturePage title="Ajukan Akun Mitra" description="Kirim permintaan pembuatan akun mitra kepada Vendor Manager." roles={["VENDOR"]}>
-      <Card><CardHeader><CardTitle className="text-lg">Data Mitra Baru</CardTitle></CardHeader><CardContent>
-        <form onSubmit={submit} className="grid gap-4 md:grid-cols-3">
-          <label className="space-y-1 text-sm">Nama<input className={fieldClass} name="name" required /></label>
-          <label className="space-y-1 text-sm">Email<input className={fieldClass} name="email" type="email" required /></label>
-          <label className="space-y-1 text-sm">Telepon<input className={fieldClass} name="phone" type="tel" /></label>
-          <FormError error={error} />
-          <Button type="submit" disabled={saving}>{saving ? "Mengirim..." : "Ajukan Akun"}</Button>
-        </form>
-      </CardContent></Card>
-      <Card><CardContent className="p-0">
-        <LoadingError loading={requests.loading} error={requests.error} empty={!requests.data.length} />
-        {!requests.loading && !requests.error && requests.data.length > 0 && (
-          <DataTable headers={["Nama", "Email", "Telepon", "Status", "Catatan"]}>
-            {requests.data.map((item) => <TableRow key={item.id}><TableCell>{item.name}</TableCell><TableCell>{item.email}</TableCell><TableCell>{item.phone || "-"}</TableCell><TableCell><StatusBadge status={item.status} /></TableCell><TableCell>{item.catatan || "-"}</TableCell></TableRow>)}
+          <DataTable headers={["Nomor", "Bulan", "Vendor", "Total", "Jatuh Tempo", "Dokumen", "Status"]}>
+            {invoices.data.map((item) => <TableRow key={item.id}><TableCell>{item.nomorInvoice}</TableCell><TableCell>{item.bulan}</TableCell><TableCell>{item.vendor?.name || "-"}</TableCell><TableCell>{item.totalAmount.toLocaleString("id-ID")}</TableCell><TableCell>{item.tanggalJatuhTempo ? new Date(item.tanggalJatuhTempo).toLocaleDateString("id-ID") : "-"}</TableCell><TableCell>{item.hasDokumen ? <a className="text-primary underline" href={`/api/invoice/${item.id}`} target="_blank" rel="noreferrer">{item.dokumenNama || "Unduh"}</a> : "-"}</TableCell><TableCell><StatusBadge status={item.status} /></TableCell></TableRow>)}
           </DataTable>
         )}
       </CardContent></Card>
@@ -633,6 +996,8 @@ export function OSRequestPage() {
   const [selectedMitraId, setSelectedMitraId] = useState("");
   const [selectedVendors, setSelectedVendors] = useState<Record<string, string>>({});
   const [assigningId, setAssigningId] = useState<string | null>(null);
+  const [activeCandidateRequestId, setActiveCandidateRequestId] = useState<string | null>(null);
+  const [candidateActionId, setCandidateActionId] = useState<string | null>(null);
 
   const needsMitraId = requestType === "PERGANTIAN" || requestType === "PENGURANGAN";
 
@@ -655,6 +1020,35 @@ export function OSRequestPage() {
       setError(assignError instanceof Error ? assignError.message : "Gagal memilih vendor.");
     } finally {
       setAssigningId(null);
+    }
+  }
+
+  async function decideCandidate(candidateId: string, decision: "APPROVED" | "REJECTED") {
+    setError(null);
+    setCandidateActionId(candidateId);
+    try {
+      await sendJson("/api/candidate", "PATCH", { candidateId, decision });
+      requests.reload();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Gagal memproses kandidat.");
+    } finally {
+      setCandidateActionId(null);
+    }
+  }
+
+  async function requestCandidateAccounts(requestId: string) {
+    setError(null);
+    setCandidateActionId(requestId);
+    try {
+      await sendJson("/api/account-request", "POST", {
+        action: "REQUEST_CANDIDATE_ACCOUNTS",
+        osRequestId: requestId,
+      });
+      requests.reload();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Gagal mengajukan aktivasi akun.");
+    } finally {
+      setCandidateActionId(null);
     }
   }
 
@@ -689,8 +1083,8 @@ export function OSRequestPage() {
   }
 
   return (
-    <FeaturePage title="Request OS" description="Ajukan atau pantau permintaan tenaga outsourcing." roles={["SM", "VM"]}>
-      {session?.user.role === "VM" && <FormError error={error} />}
+    <FeaturePage title="Request OS" description="Ajukan atau pantau permintaan tenaga outsourcing." roles={["SM", "VM", "VENDOR"]}>
+      <FormError error={error} />
       {session?.user.role === "SM" && (
         <Card><CardHeader><CardTitle className="text-lg">Buat Request OS</CardTitle></CardHeader><CardContent>
           <form id="os-request-form" onSubmit={submit} className="grid gap-4 md:grid-cols-2">
@@ -760,7 +1154,18 @@ export function OSRequestPage() {
       <Card><CardContent className="p-0">
         <LoadingError loading={requests.loading} error={requests.error} empty={!requests.data.length} />
         {!requests.loading && !requests.error && requests.data.length > 0 && (
-          <DataTable headers={["Jenis", "Jumlah", "ID Mitra OS", "Posisi", "Wilayah Operasional", "Waktu Kerja", "Pemohon", "Vendor", "Status"]}>
+          <DataTable headers={[
+            "Jenis",
+            "Jumlah",
+            "ID Mitra OS",
+            "Posisi",
+            "Wilayah Operasional",
+            "Waktu Kerja",
+            "Pemohon",
+            "Vendor",
+            "Status",
+            ...(session?.user.role === "VENDOR" ? ["Aksi"] : []),
+          ]}>
             {requests.data.map((item) => (
               <TableRow key={item.id}>
                 <TableCell>{item.type}</TableCell>
@@ -788,11 +1193,111 @@ export function OSRequestPage() {
                   ) : item.vendor?.name || "-"}
                 </TableCell>
                 <TableCell><StatusBadge status={getOSRequestStatus(item.status)} /></TableCell>
+                {session?.user.role === "VENDOR" && (
+                  <TableCell>
+                    {item.status === "VENDOR_SELECTED" ? (
+                      <Button
+                        variant={activeCandidateRequestId === item.id ? "outline" : "default"}
+                        size="sm"
+                        onClick={() => setActiveCandidateRequestId(
+                          activeCandidateRequestId === item.id ? null : item.id,
+                        )}
+                      >
+                        {activeCandidateRequestId === item.id ? "Tutup" : "Isi data"}
+                      </Button>
+                    ) : item.status === "NOT_SELECTED" ? (
+                      <StatusBadge status="OS_NOT_SELECTED" />
+                    ) : item.status === "WAITING_SELECTION" || item.status === "IN_PROGRESS" ? (
+                      <Button size="sm" variant="outline" disabled>
+                        Request akun
+                      </Button>
+                    ) : item.status === "WAITING_ACTIVATION" ? (
+                      (() => {
+                        const candidates = item.candidates || [];
+                        const hasUndecided = candidates.some((candidate) => candidate.status === "KANDIDAT");
+                        const selected = candidates.filter((candidate) => candidate.status === "TERPILIH");
+                        const canRequest = selected.some((candidate) => candidate.accountRequest?.status === "WAITING_SELECTION");
+                        const requestSent = selected.length > 0 && selected.every(
+                          (candidate) => candidate.accountRequest?.status !== "WAITING_SELECTION",
+                        );
+                        if (canRequest && !hasUndecided) {
+                          return (
+                            <Button size="sm" disabled={candidateActionId === item.id} onClick={() => requestCandidateAccounts(item.id)}>
+                              {candidateActionId === item.id ? "Mengirim..." : "Request akun"}
+                            </Button>
+                          );
+                        }
+                        if (requestSent) {
+                          return <Button size="sm" variant="outline" disabled>Menunggu Aktivasi Akun</Button>;
+                        }
+                        return <Button size="sm" variant="outline" disabled>Menunggu Hasil Seleksi</Button>;
+                      })()
+                    ) : item.status === "COMPLETED" ? (
+                      <StatusBadge status="COMPLETED" />
+                    ) : "-"}
+                  </TableCell>
+                )}
               </TableRow>
             ))}
           </DataTable>
         )}
       </CardContent></Card>
+      {session?.user.role === "SM" && requests.data
+        .filter((item) => ["WAITING_SELECTION", "IN_PROGRESS"].includes(item.status) && (item.candidates?.length || 0) > 0)
+        .map((item) => (
+          <Card key={`candidate-review-${item.id}`}>
+            <CardHeader>
+              <CardTitle className="text-lg">Seleksi Kandidat — {item.posisi || item.type}</CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Request {item.jumlah} orang · {item.vendor?.name || "Vendor"}
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {item.candidates?.map((candidate) => (
+                <div key={candidate.id} className="rounded-lg border p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="space-y-1">
+                      <p className="font-medium">{candidate.name}</p>
+                      <p className="text-sm text-muted-foreground">{candidate.email || "-"} · {candidate.phone || "-"}</p>
+                      <p className="text-sm">NIK: {candidate.nik || "-"}</p>
+                      <p className="text-sm">SIM: {candidate.jenisSim || "-"} · {candidate.noSim || "-"}</p>
+                      <p className="text-sm">
+                        Alamat: {[candidate.alamat, candidate.kelurahan, candidate.kecamatan, candidate.kabKota, candidate.provinsi]
+                          .filter(Boolean).join(", ") || "-"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {candidate.status === "KANDIDAT" ? (
+                        <>
+                          <Button disabled={candidateActionId === candidate.id} onClick={() => decideCandidate(candidate.id, "APPROVED")}>
+                            Terima
+                          </Button>
+                          <Button variant="outline" disabled={candidateActionId === candidate.id} onClick={() => decideCandidate(candidate.id, "REJECTED")}>
+                            Tolak
+                          </Button>
+                        </>
+                      ) : <StatusBadge status={candidate.status} />}
+                    </div>
+                  </div>
+                  <div className="mt-3 flex gap-3">
+                    {candidate.fotoKtp && <img className="h-24 rounded border object-contain" src={candidate.fotoKtp} alt={`Foto KTP ${candidate.name}`} />}
+                    {candidate.fotoSim && <img className="h-24 rounded border object-contain" src={candidate.fotoSim} alt={`Foto SIM ${candidate.name}`} />}
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        ))}
+      {session?.user.role === "VENDOR" && activeCandidateRequestId && requests.data
+        .filter((item) => item.id === activeCandidateRequestId)
+        .map((item) => (
+          <VendorCandidateForm
+            key={item.id}
+            request={item}
+            onSubmitted={requests.reload}
+            onClose={() => setActiveCandidateRequestId(null)}
+          />
+        ))}
     </FeaturePage>
   );
 }

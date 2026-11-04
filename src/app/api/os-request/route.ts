@@ -14,9 +14,41 @@ export async function GET(req: NextRequest) {
     let where: Prisma.OSRequestWhereInput = {};
     if (session.user.role === "SM") {
       where = { requesterId: session.user.id };
+    } else if (session.user.role === "VENDOR") {
+      if (!session.user.vendorId) {
+        return NextResponse.json({ error: "Akun vendor tidak memiliki vendor terkait" }, { status: 403 });
+      }
+      where = { vendorId: session.user.vendorId };
     } else if (session.user.role !== "VM") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+
+    const candidateSelect: Prisma.CandidateSelect = session.user.role === "SM"
+      ? {
+          id: true,
+          name: true,
+          email: true,
+          phone: true,
+          nik: true,
+          fotoKtp: true,
+          jenisSim: true,
+          noSim: true,
+          fotoSim: true,
+          alamat: true,
+          kelurahan: true,
+          kecamatan: true,
+          kabKota: true,
+          provinsi: true,
+          status: true,
+          accountRequest: { select: { status: true } },
+        }
+      : {
+          id: true,
+          name: true,
+          email: true,
+          status: true,
+          accountRequest: { select: { status: true } },
+        };
 
     const requests = await prisma.oSRequest.findMany({
       where,
@@ -28,7 +60,7 @@ export async function GET(req: NextRequest) {
           orderBy: { createdAt: "asc" },
         },
         candidates: {
-          select: { id: true, name: true, email: true, status: true },
+          select: candidateSelect,
         },
       },
       orderBy: { createdAt: "desc" },

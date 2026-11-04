@@ -18,13 +18,24 @@ export async function GET(req: NextRequest) {
 
     const invoices = await prisma.invoice.findMany({
       where,
-      include: {
+      select: {
+        id: true,
+        nomorInvoice: true,
+        bulan: true,
+        totalAmount: true,
+        status: true,
+        tanggalJatuhTempo: true,
+        dokumenNama: true,
+        createdAt: true,
         vendor: { select: { name: true } },
       },
       orderBy: { createdAt: "desc" },
     });
 
-    return NextResponse.json(invoices);
+    return NextResponse.json(invoices.map((invoice) => ({
+      ...invoice,
+      hasDokumen: Boolean(invoice.dokumenNama),
+    })));
   } catch (error) {
     console.error("Invoice GET error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
@@ -39,7 +50,25 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { bulan, totalAmount, tanggalJatuhTempo, catatan } = body;
+    const { bulan, totalAmount, tanggalJatuhTempo, catatan, dokumen, dokumenNama } = body;
+
+    if (typeof bulan !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(bulan) ||
+        typeof totalAmount !== "number" || !Number.isFinite(totalAmount) || totalAmount < 0) {
+      return NextResponse.json({ error: "Bulan dan total tagihan tidak valid." }, { status: 400 });
+    }
+
+    if (typeof dokumen !== "string" || typeof dokumenNama !== "string" || !dokumenNama.trim()) {
+      return NextResponse.json({ error: "File invoice wajib diunggah." }, { status: 400 });
+    }
+
+    const fileMatch = dokumen.match(/^data:(application\/pdf|image\/jpeg|image\/png);base64,([A-Za-z0-9+/]+={0,2})$/);
+    if (!fileMatch) {
+      return NextResponse.json({ error: "File invoice harus berupa PDF, JPG, atau PNG." }, { status: 400 });
+    }
+    const fileSize = Buffer.from(fileMatch[2], "base64").length;
+    if (fileSize === 0 || fileSize > 5 * 1024 * 1024) {
+      return NextResponse.json({ error: "Ukuran file invoice maksimal 5 MB." }, { status: 400 });
+    }
 
     // Generate invoice number
     const count = await prisma.invoice.count();
@@ -53,11 +82,13 @@ export async function POST(req: NextRequest) {
         totalAmount,
         tanggalJatuhTempo: tanggalJatuhTempo ? new Date(tanggalJatuhTempo) : undefined,
         catatan,
+        dokumen,
+        dokumenNama: dokumenNama.trim().slice(0, 255),
         status: "SUBMITTED",
       },
     });
 
-    return NextResponse.json(invoice);
+    return NextResponse.json({ id: invoice.id }, { status: 201 });
   } catch (error) {
     console.error("Invoice POST error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
