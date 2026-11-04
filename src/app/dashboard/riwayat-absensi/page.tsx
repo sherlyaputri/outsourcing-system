@@ -10,11 +10,25 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { History } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+
+interface AttendanceRecord {
+  id: string;
+  date: string;
+  checkIn?: string | null;
+  checkOut?: string | null;
+  type: string;
+  note?: string | null;
+  fotoCheckIn?: string | null;
+  fotoCheckOut?: string | null;
+  user?: { name: string };
+}
 
 export default function RiwayatAbsensiPage() {
   const { data: session } = useSession();
-  const [attendances, setAttendances] = useState<any[]>([]);
+  const [attendances, setAttendances] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedPhoto, setSelectedPhoto] = useState<{ src: string; title: string } | null>(null);
   const [month, setMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -72,6 +86,7 @@ export default function RiwayatAbsensiPage() {
                     <TableHead>Tanggal</TableHead>
                     <TableHead>Check-In</TableHead>
                     <TableHead>Check-Out</TableHead>
+                    <TableHead>Foto</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Catatan</TableHead>
                   </TableRow>
@@ -97,6 +112,21 @@ export default function RiwayatAbsensiPage() {
                           ? new Date(att.checkOut).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
                           : "-"}
                       </TableCell>
+                      <TableCell>
+                        <div className="flex gap-2">
+                          {att.fotoCheckIn && (
+                            <button type="button" onClick={() => setSelectedPhoto({ src: att.fotoCheckIn!, title: "Foto check-in" })} aria-label="Lihat foto check-in">
+                              <img className="h-12 w-12 rounded border object-cover" src={att.fotoCheckIn} alt="Foto check-in" />
+                            </button>
+                          )}
+                          {att.fotoCheckOut && (
+                            <button type="button" onClick={() => setSelectedPhoto({ src: att.fotoCheckOut!, title: "Foto check-out" })} aria-label="Lihat foto check-out">
+                              <img className="h-12 w-12 rounded border object-cover" src={att.fotoCheckOut} alt="Foto check-out" />
+                            </button>
+                          )}
+                          {!att.fotoCheckIn && !att.fotoCheckOut && "-"}
+                        </div>
+                      </TableCell>
                       <TableCell><StatusBadge status={att.type} /></TableCell>
                       <TableCell className="text-sm text-muted-foreground">{att.note || "-"}</TableCell>
                     </TableRow>
@@ -107,6 +137,19 @@ export default function RiwayatAbsensiPage() {
           </CardContent>
         </Card>
       </div>
+      <Dialog
+        open={Boolean(selectedPhoto)}
+        onOpenChange={(open) => { if (!open) setSelectedPhoto(null); }}
+      >
+        <DialogHeader>
+          <DialogTitle>{selectedPhoto?.title || "Foto absensi"}</DialogTitle>
+        </DialogHeader>
+        <DialogContent>
+          {selectedPhoto && (
+            <img className="mx-auto max-h-[70vh] max-w-full rounded object-contain" src={selectedPhoto.src} alt={selectedPhoto.title} />
+          )}
+        </DialogContent>
+      </Dialog>
     </DashboardLayout>
   );
 }

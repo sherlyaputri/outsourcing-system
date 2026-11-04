@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 interface ApiState<T> {
   data: T;
@@ -44,6 +45,12 @@ interface Mitra {
     fotoSim?: string | null;
     namaBank?: string | null;
     noRekening?: string | null;
+    nik?: string | null;
+    id?: string;
+    tempatLahir?: string | null;
+    tanggalLahir?: string | null;
+    noBpjs?: string | null;
+    documents?: { id: string; name: string; mimeType: string; createdAt: string }[];
   } | null;
 }
 
@@ -287,11 +294,20 @@ function FormError({ error }: { error: string | null }) {
   return error ? <p role="alert" className="text-sm text-red-600">{error}</p> : null;
 }
 
+function RequiredMark() {
+  return <span aria-label="wajib diisi" className="font-bold text-red-600"> *</span>;
+}
+
+function OptionalMark() {
+  return <span className="text-xs text-muted-foreground"> (Opsional)</span>;
+}
+
 const fieldClass = "w-full rounded-md border border-input bg-background px-3 py-2 text-sm";
 
 export function MitraManagementPage() {
   const { data: session } = useSession();
   const mitras = useApiData<Mitra[]>("/api/mitra", []);
+  const [editingMitra, setEditingMitra] = useState<Mitra | null>(null);
   return (
     <FeaturePage title="Data Mitra OS" description="Daftar mitra OS dan ID yang digunakan untuk request pergantian atau pengurangan." roles={["VENDOR", "VM", "SM"]}>
       <Card><CardContent className="p-0">
@@ -312,9 +328,21 @@ export function MitraManagementPage() {
                     <details>
                       <summary className="cursor-pointer text-primary">Lihat</summary>
                       <div className="mt-2 min-w-56 space-y-1 text-xs">
-                        <p>Alamat: {mitra.mitraProfile.alamat || "-"}, {mitra.mitraProfile.kelurahan || "-"}, {mitra.mitraProfile.kecamatan || "-"}, {mitra.mitraProfile.kabKota || "-"}, {mitra.mitraProfile.provinsi || "-"}</p>
+                        <p>Alamat: {[mitra.mitraProfile.provinsi, mitra.mitraProfile.kabKota, mitra.mitraProfile.kecamatan, mitra.mitraProfile.kelurahan, mitra.mitraProfile.alamat].filter(Boolean).join(", ") || "-"}</p>
                         <p>SIM: {mitra.mitraProfile.jenisSim || "-"} · {mitra.mitraProfile.noSim || "-"}</p>
                         <p>Bank: {mitra.mitraProfile.namaBank || "-"} · Rekening: {mitra.mitraProfile.noRekening || "-"}</p>
+                        {mitra.mitraProfile.documents?.map((document) => (
+                          <p key={document.id}>
+                            <a
+                              className="text-primary underline"
+                              href={`/api/mitra/${mitra.id}/documents/${document.id}`}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
+                              {document.name}
+                            </a>
+                          </p>
+                        ))}
                         <div className="flex gap-2">
                           {mitra.mitraProfile.fotoKtp && <img className="h-20 rounded border object-contain" src={mitra.mitraProfile.fotoKtp} alt="Foto KTP" />}
                           {mitra.mitraProfile.fotoSim && <img className="h-20 rounded border object-contain" src={mitra.mitraProfile.fotoSim} alt="Foto SIM" />}
@@ -323,6 +351,11 @@ export function MitraManagementPage() {
                     </details>
                   )}
                   {session?.user.role !== "VENDOR" && "-"}
+                  {session?.user.role === "VENDOR" && (
+                    <Button className="mt-2" size="sm" variant="outline" onClick={() => setEditingMitra(mitra)}>
+                      Edit data
+                    </Button>
+                  )}
                 </TableCell>
                 <TableCell><StatusBadge status={mitra.status} /></TableCell>
               </TableRow>
@@ -330,7 +363,185 @@ export function MitraManagementPage() {
           </DataTable>
         )}
       </CardContent></Card>
+      {editingMitra && (
+        <MitraEditDialog
+          mitra={editingMitra}
+          onClose={() => setEditingMitra(null)}
+          onSaved={() => {
+            setEditingMitra(null);
+            mitras.reload();
+          }}
+        />
+      )}
     </FeaturePage>
+  );
+}
+
+function MitraEditDialog({
+  mitra,
+  onClose,
+  onSaved,
+}: {
+  mitra: Mitra;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setSaving(true);
+    const form = new FormData(event.currentTarget);
+    try {
+      const files = form.getAll("documents").filter((file): file is File => file instanceof File && file.size > 0);
+      for (const file of files) {
+        if (!["application/pdf", "image/jpeg", "image/png"].includes(file.type)) {
+          throw new Error("Dokumen harus berupa PDF, JPG, atau PNG.");
+        }
+        if (file.size > 5 * 1024 * 1024) {
+          throw new Error("Ukuran setiap dokumen maksimal 5 MB.");
+        }
+      }
+
+      const documents = await Promise.all(files.map(async (file) => ({
+        name: file.name,
+        content: await readImage(file),
+      })));
+      const fotoKtp = form.get("fotoKtp");
+      const fotoSim = form.get("fotoSim");
+
+      await sendJson("/api/mitra", "PUT", {
+        userId: mitra.id,
+        name: form.get("name"),
+        email: form.get("email"),
+        phone: form.get("phone"),
+        tempatLahir: form.get("tempatLahir"),
+        tanggalLahir: form.get("tanggalLahir"),
+        alamat: form.get("alamat"),
+        kelurahan: form.get("kelurahan"),
+        kecamatan: form.get("kecamatan"),
+        kabKota: form.get("kabKota"),
+        provinsi: form.get("provinsi"),
+        noBpjs: form.get("noBpjs"),
+        noRekening: form.get("noRekening"),
+        namaBank: form.get("namaBank"),
+        penempatan: form.get("penempatan"),
+        posisi: form.get("posisi"),
+        documents,
+        ...(fotoKtp instanceof File && fotoKtp.size > 0 ? { fotoKtp: await readImage(fotoKtp) } : {}),
+        ...(fotoSim instanceof File && fotoSim.size > 0 ? { fotoSim: await readImage(fotoSim) } : {}),
+      });
+      onSaved();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "Gagal menyimpan data Mitra.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open && !saving) onClose(); }}>
+      <DialogHeader>
+        <DialogTitle>Edit data Mitra OS — {mitra.name}</DialogTitle>
+      </DialogHeader>
+      <DialogContent>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="rounded-md bg-muted p-3 text-sm">
+            <p>ID Mitra OS: <strong>{mitra.mitraProfile?.idMitraOs || "-"}</strong> (otomatis, tidak dapat diubah)</p>
+            <p>NIK: <strong>{mitra.mitraProfile?.nik || "-"}</strong> (identitas tetap; koreksi perlu dokumen resmi)</p>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="space-y-1 text-sm">Nama Mitra<RequiredMark />
+              <input className={fieldClass} name="name" defaultValue={mitra.name} required />
+            </label>
+            <label className="space-y-1 text-sm">Email akun<RequiredMark />
+              <input className={fieldClass} type="email" name="email" defaultValue={mitra.email} required />
+            </label>
+            <label className="space-y-1 text-sm">No. HP<OptionalMark />
+              <input className={fieldClass} name="phone" defaultValue={mitra.phone || ""} />
+            </label>
+            <label className="space-y-1 text-sm">Tempat lahir<OptionalMark />
+              <input className={fieldClass} name="tempatLahir" defaultValue={mitra.mitraProfile?.tempatLahir || ""} />
+            </label>
+            <label className="space-y-1 text-sm">Tanggal lahir<OptionalMark />
+              <input className={fieldClass} type="date" name="tanggalLahir" defaultValue={mitra.mitraProfile?.tanggalLahir?.slice(0, 10) || ""} />
+            </label>
+            <label className="space-y-1 text-sm">No. BPJS<OptionalMark />
+              <input className={fieldClass} name="noBpjs" defaultValue={mitra.mitraProfile?.noBpjs || ""} />
+            </label>
+            <label className="space-y-1 text-sm">Nama bank<OptionalMark />
+              <input className={fieldClass} name="namaBank" defaultValue={mitra.mitraProfile?.namaBank || ""} />
+            </label>
+            <label className="space-y-1 text-sm">No. rekening<OptionalMark />
+              <input className={fieldClass} name="noRekening" defaultValue={mitra.mitraProfile?.noRekening || ""} />
+            </label>
+            <label className="space-y-1 text-sm">Posisi<OptionalMark />
+              <input className={fieldClass} name="posisi" defaultValue={mitra.mitraProfile?.posisi || ""} />
+            </label>
+            <label className="space-y-1 text-sm">Penempatan<OptionalMark />
+              <input className={fieldClass} name="penempatan" defaultValue={mitra.mitraProfile?.penempatan || ""} />
+            </label>
+            <label className="space-y-1 text-sm">Jenis SIM<OptionalMark />
+              <select className={fieldClass} name="jenisSim" defaultValue={mitra.mitraProfile?.jenisSim || ""}>
+                <option value="">Pilih jenis SIM</option>
+                {["A", "B1", "B2", "C", "D"].map((kind) => <option key={kind} value={kind}>SIM {kind}</option>)}
+              </select>
+            </label>
+            <label className="space-y-1 text-sm">Nomor SIM<OptionalMark />
+              <input className={fieldClass} name="noSim" defaultValue={mitra.mitraProfile?.noSim || ""} />
+            </label>
+            <label className="space-y-1 text-sm">Provinsi<OptionalMark />
+              <input className={fieldClass} name="provinsi" defaultValue={mitra.mitraProfile?.provinsi || ""} />
+            </label>
+            <label className="space-y-1 text-sm">Kabupaten/Kota<OptionalMark />
+              <input className={fieldClass} name="kabKota" defaultValue={mitra.mitraProfile?.kabKota || ""} />
+            </label>
+            <label className="space-y-1 text-sm">Kecamatan<OptionalMark />
+              <input className={fieldClass} name="kecamatan" defaultValue={mitra.mitraProfile?.kecamatan || ""} />
+            </label>
+            <label className="space-y-1 text-sm">Kelurahan/Desa<OptionalMark />
+              <input className={fieldClass} name="kelurahan" defaultValue={mitra.mitraProfile?.kelurahan || ""} />
+            </label>
+            <label className="space-y-1 text-sm md:col-span-2">Alamat tempat tinggal<OptionalMark />
+              <textarea className={fieldClass} name="alamat" rows={2} defaultValue={mitra.mitraProfile?.alamat || ""} />
+            </label>
+            <label className="space-y-1 text-sm md:col-span-2">Dokumen tambahan (PDF/JPG/PNG, maks. 5 MB per file)<OptionalMark />
+              <input className={fieldClass} type="file" name="documents" multiple accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" />
+            </label>
+            <label className="space-y-1 text-sm">Ganti foto KTP (JPG/PNG, maks. 5 MB)<OptionalMark />
+              <input className={fieldClass} type="file" name="fotoKtp" accept="image/jpeg,image/png" />
+            </label>
+            <label className="space-y-1 text-sm">Ganti foto SIM (JPG/PNG, maks. 5 MB)<OptionalMark />
+              <input className={fieldClass} type="file" name="fotoSim" accept="image/jpeg,image/png" />
+            </label>
+          </div>
+          {(mitra.mitraProfile?.documents?.length || 0) > 0 && (
+            <div className="space-y-1 text-sm">
+              <p className="font-medium">Dokumen yang sudah diunggah</p>
+              {mitra.mitraProfile?.documents?.map((document) => (
+                <p key={document.id}>
+                  <a
+                    className="text-primary underline"
+                    href={`/api/mitra/${mitra.id}/documents/${document.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {document.name}
+                  </a>
+                </p>
+              ))}
+            </div>
+          )}
+          <FormError error={error} />
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" disabled={saving} onClick={onClose}>Batal</Button>
+            <Button type="submit" disabled={saving}>{saving ? "Menyimpan..." : "Simpan data"}</Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -356,7 +567,7 @@ function MitraIdPicker({
 
   return (
     <div className="relative space-y-1 text-sm">
-      <label htmlFor="idMitraOs" className="font-medium">ID Mitra OS</label>
+      <label htmlFor="idMitraOs" className="font-medium">ID Mitra OS<RequiredMark /></label>
       <input
         id="idMitraOs"
         className={fieldClass}
@@ -530,39 +741,28 @@ function RegionPicker({
 
   return (
     <div className="space-y-4 md:col-span-2">
-      <label className="block space-y-1 text-sm">Kelurahan/Desa
+      <label className="block space-y-1 text-sm">Provinsi<RequiredMark />
         <select
           className={fieldClass}
           required
-          disabled={!districtId || loading}
-          value={villages.find((region) => region.name === value.kelurahan)?.id || ""}
+          disabled={loading && provinces.length === 0}
+          value={provinceId}
           onChange={(event) => {
-            const selected = villages.find((region) => region.id === event.target.value);
-            onChange("kelurahan", selected?.name || "");
-          }}
-        >
-          <option value="">Pilih kelurahan/desa</option>
-          {villages.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}
-        </select>
-      </label>
-      <label className="block space-y-1 text-sm">Kecamatan
-        <select
-          className={fieldClass}
-          value={districtId}
-          required
-          disabled={!regencyId || loading}
-          onChange={(event) => {
-            const selected = districts.find((region) => region.id === event.target.value);
-            setDistrictId(event.target.value);
-            onChange("kecamatan", selected?.name || "");
+            const selected = provinces.find((region) => region.id === event.target.value);
+            setProvinceId(event.target.value);
+            setRegencyId("");
+            setDistrictId("");
+            onChange("provinsi", selected?.name || "");
+            onChange("kabKota", "");
+            onChange("kecamatan", "");
             onChange("kelurahan", "");
           }}
         >
-          <option value="">Pilih kecamatan</option>
-          {districts.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}
+          <option value="">Pilih provinsi</option>
+          {provinces.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}
         </select>
       </label>
-      <label className="block space-y-1 text-sm">Kab/Kota
+      <label className="block space-y-1 text-sm">Kabupaten/Kota<RequiredMark />
         <select
           className={fieldClass}
           value={regencyId}
@@ -581,28 +781,39 @@ function RegionPicker({
           {regencies.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}
         </select>
       </label>
-      <label className="block space-y-1 text-sm">Provinsi
+      <label className="block space-y-1 text-sm">Kecamatan<RequiredMark />
         <select
           className={fieldClass}
-          value={provinceId}
+          value={districtId}
           required
-          disabled={loading && provinces.length === 0}
+          disabled={!regencyId || loading}
           onChange={(event) => {
-            const selected = provinces.find((region) => region.id === event.target.value);
-            setProvinceId(event.target.value);
-            setRegencyId("");
-            setDistrictId("");
-            onChange("provinsi", selected?.name || "");
-            onChange("kabKota", "");
-            onChange("kecamatan", "");
+            const selected = districts.find((region) => region.id === event.target.value);
+            setDistrictId(event.target.value);
+            onChange("kecamatan", selected?.name || "");
             onChange("kelurahan", "");
           }}
         >
-          <option value="">Pilih provinsi (pilih pertama)</option>
-          {provinces.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}
+          <option value="">Pilih kecamatan</option>
+          {districts.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}
         </select>
       </label>
-      <p className="text-xs text-muted-foreground">Pilih wilayah dari bawah ke atas: provinsi, kabupaten/kota, kecamatan, lalu kelurahan/desa.</p>
+      <label className="block space-y-1 text-sm">Kelurahan/Desa<RequiredMark />
+        <select
+          className={fieldClass}
+          required
+          disabled={!districtId || loading}
+          value={villages.find((region) => region.name === value.kelurahan)?.id || ""}
+          onChange={(event) => {
+            const selected = villages.find((region) => region.id === event.target.value);
+            onChange("kelurahan", selected?.name || "");
+          }}
+        >
+          <option value="">Pilih kelurahan/desa</option>
+          {villages.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}
+        </select>
+      </label>
+      <p className="text-xs text-muted-foreground">Pilih wilayah berurutan dari provinsi hingga kelurahan/desa.</p>
       <FormError error={error} />
     </div>
   );
@@ -620,35 +831,32 @@ function CandidateFields({
   return (
     <fieldset className="grid gap-4 rounded-md border p-4 md:grid-cols-2">
       <legend className="px-1 text-sm font-medium">Data kandidat {index + 1}</legend>
-      <label className="space-y-1 text-sm">Nama Mitra
+      <label className="space-y-1 text-sm">Nama Mitra<RequiredMark />
         <input className={fieldClass} value={candidate.name} onChange={(event) => update(index, "name", event.target.value)} required />
       </label>
-      <label className="space-y-1 text-sm">NIK KTP (16 digit angka)
+      <label className="space-y-1 text-sm">NIK KTP (16 digit angka)<RequiredMark />
         <input className={fieldClass} type="text" inputMode="numeric" pattern="[0-9]{16}" maxLength={16} value={candidate.nik} onChange={(event) => update(index, "nik", event.target.value.replace(/\D/g, "").slice(0, 16))} required />
       </label>
-      <label className="space-y-1 text-sm">Foto KTP (JPG/PNG, maks. 5 MB)
+      <label className="space-y-1 text-sm">Foto KTP (JPG/PNG, maks. 5 MB)<RequiredMark />
         <input className={fieldClass} type="file" accept="image/jpeg,image/png" onChange={(event) => update(index, "fotoKtp", event.target.files?.[0] || null)} required />
       </label>
-      <label className="space-y-1 text-sm">Jenis SIM
+      <label className="space-y-1 text-sm">Jenis SIM<RequiredMark />
         <select className={fieldClass} value={candidate.jenisSim} onChange={(event) => update(index, "jenisSim", event.target.value)} required>
           <option value="">Pilih jenis SIM</option>
           {["A", "B1", "B2", "C", "D"].map((kind) => <option key={kind} value={kind}>SIM {kind}</option>)}
         </select>
       </label>
-      <label className="space-y-1 text-sm">No. SIM (hanya angka)
+      <label className="space-y-1 text-sm">No. SIM (hanya angka)<RequiredMark />
         <input className={fieldClass} type="text" inputMode="numeric" value={candidate.noSim} onChange={(event) => update(index, "noSim", event.target.value.replace(/\D/g, ""))} required />
       </label>
-      <label className="space-y-1 text-sm">Foto SIM (JPG/PNG, maks. 5 MB)
+      <label className="space-y-1 text-sm">Foto SIM (JPG/PNG, maks. 5 MB)<RequiredMark />
         <input className={fieldClass} type="file" accept="image/jpeg,image/png" onChange={(event) => update(index, "fotoSim", event.target.files?.[0] || null)} required />
       </label>
-      <label className="space-y-1 text-sm">No. HP (hanya angka: 08xxxxxxxxxxxx)
+      <label className="space-y-1 text-sm">No. HP (hanya angka: 08xxxxxxxxxxxx)<RequiredMark />
         <input className={fieldClass} type="text" inputMode="numeric" pattern="08[0-9]{8,12}" maxLength={14} placeholder="08xxxxxxxxxxxx" value={candidate.phone} onChange={(event) => update(index, "phone", event.target.value.replace(/\D/g, "").slice(0, 14))} required />
       </label>
-      <label className="space-y-1 text-sm">Email (format: nama@domain.com)
+      <label className="space-y-1 text-sm">Email (format: nama@domain.com)<RequiredMark />
         <input className={fieldClass} type="email" placeholder="nama@domain.com" value={candidate.email} onChange={(event) => update(index, "email", event.target.value)} required />
-      </label>
-      <label className="space-y-1 text-sm md:col-span-2">Alamat tempat tinggal
-        <input className={fieldClass} value={candidate.alamat} onChange={(event) => update(index, "alamat", event.target.value)} required />
       </label>
       <RegionPicker
         value={{
@@ -659,6 +867,9 @@ function CandidateFields({
         }}
         onChange={(field, value) => update(index, field, value)}
       />
+      <label className="space-y-1 text-sm md:col-span-2">Alamat tempat tinggal<RequiredMark />
+        <input className={fieldClass} value={candidate.alamat} onChange={(event) => update(index, "alamat", event.target.value)} required />
+      </label>
     </fieldset>
   );
 }
@@ -672,9 +883,7 @@ function VendorCandidateForm({
   onSubmitted: () => void;
   onClose: () => void;
 }) {
-  const [candidates, setCandidates] = useState<CandidateDraft[]>(
-    () => Array.from({ length: request.jumlah }, () => emptyCandidate()),
-  );
+  const [candidates, setCandidates] = useState<CandidateDraft[]>([emptyCandidate()]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -687,11 +896,11 @@ function VendorCandidateForm({
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-    if (candidates.length !== request.jumlah) {
-      setError(`Jumlah kandidat harus tepat ${request.jumlah} orang.`);
+    if (candidates.length < 1 || candidates.length > 10) {
+      setError("Vendor dapat mengirim 1 sampai 10 kandidat untuk setiap request.");
       return;
     }
-    if (!window.confirm(`Anda akan submit ${request.jumlah} kandidat. Lanjutkan?`)) return;
+    if (!window.confirm(`Anda akan submit ${candidates.length} kandidat. Lanjutkan?`)) return;
     setSaving(true);
     try {
       for (const candidate of candidates) {
@@ -720,37 +929,59 @@ function VendorCandidateForm({
   if (request.status !== "VENDOR_SELECTED") return null;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-lg">Data kandidat untuk Request OS</CardTitle>
-        <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
+    <Dialog open onOpenChange={(open) => { if (!open && !saving) onClose(); }}>
+      <DialogHeader>
+        <DialogTitle>Isi data Mitra OS</DialogTitle>
+      </DialogHeader>
+      <DialogContent>
+        <div className="mb-5 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
           <p>Jenis Permintaan: <strong>{request.type}</strong></p>
           {request.type === "PERGANTIAN" && <p>ID Pergantian: <strong>{request.idMitraOs || request.idPergantian || "-"}</strong></p>}
           <p>Posisi Kebutuhan: <strong>{request.posisi || "-"}</strong></p>
           <p>Wilayah Operasional: <strong>{request.penempatan || "-"}</strong></p>
           <p>Waktu Kerja: <strong>{request.waktuKerja || "-"}</strong></p>
-          <p>Jumlah Kebutuhan: <strong>{request.jumlah}</strong></p>
+          <p>Kandidat diajukan: <strong>{candidates.length}</strong></p>
         </div>
-      </CardHeader>
-      <CardContent>
         <form onSubmit={submit} className="space-y-6">
           {candidates.map((candidate, index) => (
-            <div key={index}>
+            <div key={index} className="space-y-2">
               <CandidateFields candidate={candidate} index={index} update={updateCandidate} />
+              {candidates.length > 1 && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={saving}
+                  onClick={() => setCandidates((current) => current.filter((_, candidateIndex) => candidateIndex !== index))}
+                >
+                  Hapus kandidat {index + 1}
+                </Button>
+              )}
             </div>
           ))}
-          <p className="text-sm font-medium">Jumlah kandidat yang akan dikirim: {request.jumlah}</p>
-              <p className="text-xs text-muted-foreground">
-                Foto harus JPG/PNG, maks. 5 MB per berkas dan 15 MB total per pengiriman. Email hanya diperiksa format dan duplikasinya.
+          <p className="text-xs text-muted-foreground">
+            Tanda <span className="font-bold text-red-600">*</span> berarti wajib diisi. Foto maks. 5 MB per berkas dan 15 MB total.
           </p>
           <FormError error={error} />
           <div className="flex flex-wrap justify-between gap-2">
-            <Button type="button" variant="outline" disabled={saving} onClick={onClose}>Tutup</Button>
-            <Button type="submit" disabled={saving}>{saving ? "Mengirim..." : "Submit"}</Button>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={saving || candidates.length >= 10}
+                onClick={() => setCandidates((current) => [...current, emptyCandidate()])}
+              >
+                + Tambah Kandidat
+              </Button>
+              <Button type="button" variant="outline" disabled={saving} onClick={onClose}>Tutup</Button>
+            </div>
+            <Button type="submit" disabled={saving || candidates.length < 1 || candidates.length > 10}>
+              {saving ? "Mengirim..." : "Submit"}
+            </Button>
           </div>
         </form>
-      </CardContent>
-    </Card>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -875,18 +1106,18 @@ export function ClaimsPage() {
       {session?.user.role === "VM" && (
         <Card><CardHeader><CardTitle className="text-lg">Upload Data Klaim</CardTitle></CardHeader><CardContent>
           <form onSubmit={submit} className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-1 text-sm">Vendor
+            <label className="space-y-1 text-sm">Vendor<RequiredMark />
               <select className={fieldClass} name="vendorId" required defaultValue="">
                 <option value="" disabled>Pilih vendor</option>
                 {vendors.data.filter((vendor) => vendor.status === "ACTIVE").map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
               </select>
             </label>
-            <label className="space-y-1 text-sm">Bulan<input className={fieldClass} type="month" name="bulan" required /></label>
-            <label className="space-y-1 text-sm">Jenis klaim<input className={fieldClass} name="jenisClaim" placeholder="GAJI, BPJS, LEMBUR..." required /></label>
-            <label className="space-y-1 text-sm">Jumlah mitra<input className={fieldClass} type="number" min="1" name="jumlahMitra" required /></label>
-            <label className="space-y-1 text-sm">Nominal total<input className={fieldClass} type="number" min="0" step="any" name="nominal" required /></label>
-            <label className="space-y-1 text-sm md:col-span-2">Catatan<textarea className={fieldClass} name="catatan" rows={2} /></label>
-            <label className="space-y-1 text-sm md:col-span-2">Dokumen klaim (PDF/JPG/PNG, maks. 5 MB)<input className={fieldClass} type="file" name="dokumen" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required /></label>
+            <label className="space-y-1 text-sm">Bulan<RequiredMark /><input className={fieldClass} type="month" name="bulan" required /></label>
+            <label className="space-y-1 text-sm">Jenis klaim<RequiredMark /><input className={fieldClass} name="jenisClaim" placeholder="GAJI, BPJS, LEMBUR..." required /></label>
+            <label className="space-y-1 text-sm">Jumlah mitra<RequiredMark /><input className={fieldClass} type="number" min="1" name="jumlahMitra" required /></label>
+            <label className="space-y-1 text-sm">Nominal total<RequiredMark /><input className={fieldClass} type="number" min="0" step="any" name="nominal" required /></label>
+            <label className="space-y-1 text-sm md:col-span-2">Catatan<OptionalMark /><textarea className={fieldClass} name="catatan" rows={2} /></label>
+            <label className="space-y-1 text-sm md:col-span-2">Dokumen klaim (PDF/JPG/PNG, maks. 5 MB)<RequiredMark /><input className={fieldClass} type="file" name="dokumen" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required /></label>
             <FormError error={error} />
             {vendors.error && <FormError error={`Data vendor gagal dimuat: ${vendors.error}`} />}
             <Button type="submit" disabled={saving || vendors.loading}>{saving ? "Mengunggah..." : "Upload Klaim"}</Button>
@@ -963,11 +1194,11 @@ export function InvoicesPage() {
       {session?.user.role === "VENDOR" && (
         <Card><CardHeader><CardTitle className="text-lg">Buat Invoice</CardTitle></CardHeader><CardContent>
           <form onSubmit={submit} className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-1 text-sm">Bulan<input className={fieldClass} type="month" name="bulan" required /></label>
-            <label className="space-y-1 text-sm">Total tagihan<input className={fieldClass} type="number" min="0" step="any" name="totalAmount" required /></label>
-            <label className="space-y-1 text-sm">Jatuh tempo<input className={fieldClass} type="date" name="tanggalJatuhTempo" /></label>
-            <label className="space-y-1 text-sm">Catatan<input className={fieldClass} name="catatan" /></label>
-            <label className="space-y-1 text-sm md:col-span-2">File invoice (PDF/JPG/PNG, maks. 5 MB)<input className={fieldClass} type="file" name="dokumen" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required /></label>
+            <label className="space-y-1 text-sm">Bulan<RequiredMark /><input className={fieldClass} type="month" name="bulan" required /></label>
+            <label className="space-y-1 text-sm">Total tagihan<RequiredMark /><input className={fieldClass} type="number" min="0" step="any" name="totalAmount" required /></label>
+            <label className="space-y-1 text-sm">Jatuh tempo<OptionalMark /><input className={fieldClass} type="date" name="tanggalJatuhTempo" /></label>
+            <label className="space-y-1 text-sm">Catatan<OptionalMark /><input className={fieldClass} name="catatan" /></label>
+            <label className="space-y-1 text-sm md:col-span-2">File invoice (PDF/JPG/PNG, maks. 5 MB)<RequiredMark /><input className={fieldClass} type="file" name="dokumen" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required /></label>
             <FormError error={error} />
             <Button type="submit" disabled={saving}>{saving ? "Mengunggah..." : "Upload Invoice"}</Button>
           </form>
@@ -997,6 +1228,7 @@ export function OSRequestPage() {
   const [selectedVendors, setSelectedVendors] = useState<Record<string, string>>({});
   const [assigningId, setAssigningId] = useState<string | null>(null);
   const [activeCandidateRequestId, setActiveCandidateRequestId] = useState<string | null>(null);
+  const [activeReviewRequestId, setActiveReviewRequestId] = useState<string | null>(null);
   const [candidateActionId, setCandidateActionId] = useState<string | null>(null);
 
   const needsMitraId = requestType === "PERGANTIAN" || requestType === "PENGURANGAN";
@@ -1087,9 +1319,10 @@ export function OSRequestPage() {
       <FormError error={error} />
       {session?.user.role === "SM" && (
         <Card><CardHeader><CardTitle className="text-lg">Buat Request OS</CardTitle></CardHeader><CardContent>
+          <p className="mb-4 text-sm text-muted-foreground">Field bertanda <RequiredMark /> wajib diisi.</p>
           <form id="os-request-form" onSubmit={submit} className="grid gap-4 md:grid-cols-2">
             <label className="space-y-1 text-sm">
-              Jenis Permintaan
+              Jenis Permintaan<RequiredMark />
               <select
                 className={fieldClass}
                 name="type"
@@ -1105,7 +1338,7 @@ export function OSRequestPage() {
               </select>
             </label>
             <label className="space-y-1 text-sm">
-              Jumlah
+              Jumlah<RequiredMark />
               <input className={fieldClass} type="number" min="1" name="jumlah" defaultValue="1" required />
             </label>
             {needsMitraId ? (
@@ -1114,7 +1347,7 @@ export function OSRequestPage() {
               <div aria-hidden="true" className="min-h-[65px]" />
             )}
             <label className="space-y-1 text-sm">
-              Posisi Kebutuhan
+              Posisi Kebutuhan<RequiredMark />
               <select className={fieldClass} name="posisi" required defaultValue="">
                 <option value="" disabled>Pilih posisi</option>
                 <option value="OS001: Sorter">OS001: Sorter</option>
@@ -1125,7 +1358,7 @@ export function OSRequestPage() {
               </select>
             </label>
             <label className="space-y-1 text-sm">
-              Wilayah Operasional
+              Wilayah Operasional<RequiredMark />
               <select className={fieldClass} name="penempatan" required defaultValue="">
                 <option value="" disabled>Pilih wilayah</option>
                 <option value="kantor1">kantor1</option>
@@ -1134,7 +1367,7 @@ export function OSRequestPage() {
               </select>
             </label>
             <label className="space-y-1 text-sm">
-              Waktu Kerja
+              Waktu Kerja<RequiredMark />
               <select className={fieldClass} name="waktuKerja" required defaultValue="">
                 <option value="" disabled>Pilih waktu kerja</option>
                 <option value="08:00-17:00">08:00-17:00</option>
@@ -1164,6 +1397,7 @@ export function OSRequestPage() {
             "Pemohon",
             "Vendor",
             "Status",
+            ...(session?.user.role === "SM" ? ["Kandidat"] : []),
             ...(session?.user.role === "VENDOR" ? ["Aksi"] : []),
           ]}>
             {requests.data.map((item) => (
@@ -1193,6 +1427,13 @@ export function OSRequestPage() {
                   ) : item.vendor?.name || "-"}
                 </TableCell>
                 <TableCell><StatusBadge status={getOSRequestStatus(item.status)} /></TableCell>
+                {session?.user.role === "SM" && (
+                  <TableCell>
+                    {(item.candidates?.length || 0) > 0
+                      ? <Button size="sm" variant="outline" onClick={() => setActiveReviewRequestId(item.id)}>Lihat Detail</Button>
+                      : "-"}
+                  </TableCell>
+                )}
                 {session?.user.role === "VENDOR" && (
                   <TableCell>
                     {item.status === "VENDOR_SELECTED" ? (
@@ -1242,59 +1483,66 @@ export function OSRequestPage() {
           </DataTable>
         )}
       </CardContent></Card>
-      {session?.user.role === "SM" && requests.data
-        .filter((item) => ["WAITING_SELECTION", "IN_PROGRESS"].includes(item.status) && (item.candidates?.length || 0) > 0)
-        .map((item) => (
-          <Card key={`candidate-review-${item.id}`}>
-            <CardHeader>
-              <CardTitle className="text-lg">Seleksi Kandidat — {item.posisi || item.type}</CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Request {item.jumlah} orang · {item.vendor?.name || "Vendor"}
-              </p>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {item.candidates?.map((candidate) => (
-                <div key={candidate.id} className="rounded-lg border p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="space-y-1">
-                      <p className="font-medium">{candidate.name}</p>
-                      <p className="text-sm text-muted-foreground">{candidate.email || "-"} · {candidate.phone || "-"}</p>
-                      <p className="text-sm">NIK: {candidate.nik || "-"}</p>
-                      <p className="text-sm">SIM: {candidate.jenisSim || "-"} · {candidate.noSim || "-"}</p>
-                      <p className="text-sm">
-                        Alamat: {[candidate.alamat, candidate.kelurahan, candidate.kecamatan, candidate.kabKota, candidate.provinsi]
-                          .filter(Boolean).join(", ") || "-"}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {candidate.status === "KANDIDAT" ? (
-                        <>
-                          <Button disabled={candidateActionId === candidate.id} onClick={() => decideCandidate(candidate.id, "APPROVED")}>
-                            Terima
-                          </Button>
-                          <Button variant="outline" disabled={candidateActionId === candidate.id} onClick={() => decideCandidate(candidate.id, "REJECTED")}>
-                            Tolak
-                          </Button>
-                        </>
-                      ) : <StatusBadge status={candidate.status} />}
-                    </div>
+      {session?.user.role === "SM" && (
+        <Dialog
+          open={Boolean(activeReviewRequestId)}
+          onOpenChange={(open) => { if (!open) setActiveReviewRequestId(null); }}
+        >
+          <DialogHeader>
+            <DialogTitle>
+              Seleksi Kandidat — {requests.data.find((item) => item.id === activeReviewRequestId)?.posisi || "Request OS"}
+            </DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              Request {requests.data.find((item) => item.id === activeReviewRequestId)?.jumlah || 0} orang ·
+              {" "}{requests.data.find((item) => item.id === activeReviewRequestId)?.vendor?.name || "Vendor"}
+            </p>
+          </DialogHeader>
+          <DialogContent className="space-y-4">
+            {requests.data.find((item) => item.id === activeReviewRequestId)?.candidates?.map((candidate) => (
+              <div key={candidate.id} className="rounded-lg border p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <p className="font-medium">{candidate.name}</p>
+                    <p className="text-sm text-muted-foreground">{candidate.email || "-"} · {candidate.phone || "-"}</p>
+                    <p className="text-sm">NIK: {candidate.nik || "-"}</p>
+                    <p className="text-sm">SIM: {candidate.jenisSim || "-"} · {candidate.noSim || "-"}</p>
+                    <p className="text-sm">
+                      Alamat: {[candidate.provinsi, candidate.kabKota, candidate.kecamatan, candidate.kelurahan, candidate.alamat]
+                        .filter(Boolean).join(", ") || "-"}
+                    </p>
                   </div>
-                  <div className="mt-3 flex gap-3">
-                    {candidate.fotoKtp && <img className="h-24 rounded border object-contain" src={candidate.fotoKtp} alt={`Foto KTP ${candidate.name}`} />}
-                    {candidate.fotoSim && <img className="h-24 rounded border object-contain" src={candidate.fotoSim} alt={`Foto SIM ${candidate.name}`} />}
+                  <div className="flex items-center gap-2">
+                    {candidate.status === "KANDIDAT" ? (
+                      <>
+                        <Button disabled={candidateActionId === candidate.id} onClick={() => decideCandidate(candidate.id, "APPROVED")}>
+                          Terima
+                        </Button>
+                        <Button variant="outline" disabled={candidateActionId === candidate.id} onClick={() => decideCandidate(candidate.id, "REJECTED")}>
+                          Tolak
+                        </Button>
+                      </>
+                    ) : <StatusBadge status={candidate.status} />}
                   </div>
                 </div>
-              ))}
-            </CardContent>
-          </Card>
-        ))}
+                <div className="mt-3 flex gap-3">
+                  {candidate.fotoKtp && <a href={candidate.fotoKtp} target="_blank" rel="noreferrer"><img className="h-24 rounded border object-contain" src={candidate.fotoKtp} alt={`Foto KTP ${candidate.name}`} /></a>}
+                  {candidate.fotoSim && <a href={candidate.fotoSim} target="_blank" rel="noreferrer"><img className="h-24 rounded border object-contain" src={candidate.fotoSim} alt={`Foto SIM ${candidate.name}`} /></a>}
+                </div>
+              </div>
+            ))}
+          </DialogContent>
+        </Dialog>
+      )}
       {session?.user.role === "VENDOR" && activeCandidateRequestId && requests.data
         .filter((item) => item.id === activeCandidateRequestId)
         .map((item) => (
           <VendorCandidateForm
             key={item.id}
             request={item}
-            onSubmitted={requests.reload}
+            onSubmitted={() => {
+              setActiveCandidateRequestId(null);
+              requests.reload();
+            }}
             onClose={() => setActiveCandidateRequestId(null)}
           />
         ))}

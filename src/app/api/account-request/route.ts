@@ -6,6 +6,8 @@ import { Prisma } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { randomUUID } from "node:crypto";
 
+class CandidateQuotaReachedError extends Error {}
+
 export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -17,7 +19,14 @@ export async function GET(req: NextRequest) {
       status: "PENDING",
       OR: [
         { candidate: null },
-        { candidate: { is: { status: "TERPILIH" } } },
+        {
+          candidate: {
+            is: {
+              status: "TERPILIH",
+              osRequest: { is: { status: "WAITING_ACTIVATION" } },
+            },
+          },
+        },
       ],
     };
     const candidateSelect = session.user.role === "VM"
@@ -134,6 +143,9 @@ export async function PATCH(req: NextRequest) {
     if (accountReq.candidate && accountReq.candidate.status !== "TERPILIH") {
       return NextResponse.json({ error: "Kandidat belum lolos seleksi SM." }, { status: 409 });
     }
+    if (accountReq.candidate && accountReq.candidate.osRequest.status !== "WAITING_ACTIVATION") {
+      return NextResponse.json({ error: "Request OS ini sudah selesai diproses." }, { status: 409 });
+    }
 
     if (status === "APPROVED") {
       const hashedPassword = await bcrypt.hash("mitra123", 10);
@@ -143,6 +155,18 @@ export async function PATCH(req: NextRequest) {
       }
 
       const result = await prisma.$transaction(async (tx) => {
+        if (accountReq.candidate) {
+          const activatedCount = await tx.candidate.count({
+            where: {
+              osRequestId: accountReq.candidate.osRequestId,
+              status: "ACTIVATED",
+            },
+          });
+          if (activatedCount >= accountReq.candidate.osRequest.jumlah) {
+            throw new CandidateQuotaReachedError();
+          }
+        }
+
         const user = await tx.user.create({
           data: {
             email: accountReq.email,
@@ -197,10 +221,15 @@ export async function PATCH(req: NextRequest) {
               candidate: { is: { osRequestId: accountReq.candidate.osRequestId } },
             },
           });
-          if (pendingCount === 0) {
-            const activatedCount = await tx.candidate.count({
-              where: { osRequestId: accountReq.candidate.osRequestId, status: "ACTIVATED" },
+          const activatedCount = await tx.candidate.count({
+            where: { osRequestId: accountReq.candidate.osRequestId, status: "ACTIVATED" },
+          });
+          if (activatedCount >= accountReq.candidate.osRequest.jumlah) {
+            await tx.oSRequest.update({
+              where: { id: accountReq.candidate.osRequestId },
+              data: { status: "COMPLETED" },
             });
+          } else if (pendingCount === 0) {
             await tx.oSRequest.update({
               where: { id: accountReq.candidate.osRequestId },
               data: { status: activatedCount > 0 ? "COMPLETED" : "NOT_SELECTED" },
@@ -217,7 +246,7 @@ export async function PATCH(req: NextRequest) {
             handlerId: session.user.id,
           },
         });
-      });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
       return NextResponse.json(result);
     }
@@ -260,6 +289,12 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json(result);
   } catch (error) {
     console.error("Account Request PATCH error:", error);
+    if (error instanceof CandidateQuotaReachedError) {
+      return NextResponse.json({ error: "Jumlah kandidat yang diaktifkan sudah memenuhi kuota Request OS." }, { status: 409 });
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
+      return NextResponse.json({ error: "Request OS sedang diproses bersamaan. Silakan coba kembali." }, { status: 409 });
+    }
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }

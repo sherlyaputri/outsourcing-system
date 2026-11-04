@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const maxImageBytes = 5 * 1024 * 1024;
+const maxCandidatesPerSubmission = 10;
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
@@ -27,9 +28,10 @@ export async function POST(req: NextRequest) {
     if (
       !isNonEmptyString(osRequestId) ||
       !Array.isArray(candidates) ||
-      candidates.length < 1
+      candidates.length < 1 ||
+      candidates.length > maxCandidatesPerSubmission
     ) {
-      return NextResponse.json({ error: "Data kandidat tidak valid." }, { status: 400 });
+      return NextResponse.json({ error: "Data kandidat tidak valid (1-10 kandidat per pengiriman)." }, { status: 400 });
     }
 
     const osRequest = await prisma.oSRequest.findFirst({
@@ -44,10 +46,6 @@ export async function POST(req: NextRequest) {
     if (!osRequest) {
       return NextResponse.json({ error: "Request tidak ditemukan atau tidak dapat menerima kandidat." }, { status: 404 });
     }
-    if (candidates.length !== osRequest.jumlah) {
-      return NextResponse.json({ error: `Jumlah kandidat harus tepat ${osRequest.jumlah} orang.` }, { status: 400 });
-    }
-
     const existingCandidates = await prisma.candidate.count({ where: { osRequestId } });
     if (existingCandidates > 0) {
       return NextResponse.json({ error: "Data kandidat untuk request ini sudah pernah dikirim." }, { status: 409 });
