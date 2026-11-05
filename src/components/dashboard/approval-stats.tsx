@@ -10,16 +10,19 @@ export default function ApprovalStats({ stats }: { stats: DashboardStats }) {
         value={stats.pendingApprovals || 0}
         icon={<Clock size={24} />}
         className={stats.pendingApprovals ? "border-yellow-200" : ""}
+        href="/dashboard/approval"
       />
       <StatCard
         title="Disetujui"
         value={stats.approvedTotal || 0}
         icon={<CheckCircle size={24} />}
+        href="/dashboard/approval"
       />
       <StatCard
         title="Ditolak"
         value={stats.rejectedTotal || 0}
         icon={<XCircle size={24} />}
+        href="/dashboard/approval"
       />
     </div>
   );

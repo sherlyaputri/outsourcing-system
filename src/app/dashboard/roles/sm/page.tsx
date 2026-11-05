@@ -14,16 +14,19 @@ export default function SMDashboardPage() {
             title="Total Request"
             value={stats.myRequests || 0}
             icon={<FileText size={24} />}
+            href="/dashboard/request-os"
           />
           <StatCard
             title="Request Pending"
             value={stats.pendingRequests || 0}
             icon={<Clock size={24} />}
+            href="/dashboard/request-os"
           />
           <StatCard
             title="Request Selesai"
             value={stats.approvedRequests || 0}
             icon={<CheckCircle size={24} />}
+            href="/dashboard/request-os"
           />
         </div>
       )}

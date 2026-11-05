@@ -65,6 +65,8 @@ export function getStatusColor(status: string): string {
     OS_NOT_SELECTED: 'bg-red-100 text-red-800',
     WAITING_SELECTION: 'bg-yellow-100 text-yellow-800',
     WAITING_ACTIVATION: 'bg-blue-100 text-blue-800',
+    IN_SELECTION: 'bg-yellow-100 text-yellow-800',
+    HIRED: 'bg-green-100 text-green-800',
   };
   return colors[status] || 'bg-gray-100 text-gray-800';
 }
@@ -102,6 +104,8 @@ export function getStatusLabel(status: string): string {
     OS_WAITING_SELECTION: 'Menunggu Hasil Proses Seleksi',
     OS_NOT_SELECTED: 'Tidak Lolos Seleksi',
     WAITING_SELECTION: 'Menunggu Hasil Proses Seleksi',
+    IN_SELECTION: 'Sedang Diajukan',
+    HIRED: 'Sudah Ditempatkan',
     PENAMBAHAN: 'Penambahan',
     PERGANTIAN: 'Pergantian',
     PENGURANGAN: 'Pengurangan',

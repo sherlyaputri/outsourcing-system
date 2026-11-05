@@ -7,6 +7,7 @@ import { signOut } from "next-auth/react";
 import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
+  Building2,
   Users,
   UserCheck,
   ClipboardList,
@@ -50,6 +51,7 @@ function getNavItems(role: string): NavItem[] {
       return [
         dashboardItem,
         { label: "Request OS", href: "/dashboard/request-os", icon: <FileText size={20} /> },
+        { label: "Data Karyawan", href: "/dashboard/data-karyawan", icon: <Users size={20} /> },
         { label: "Data Mitra OS", href: "/dashboard/mitra", icon: <Users size={20} /> },
         { label: "Riwayat Absensi", href: "/dashboard/riwayat-absensi", icon: <History size={20} /> },
         { label: "Daftar Klaim", href: "/dashboard/klaim", icon: <ClipboardList size={20} /> },
@@ -58,6 +60,7 @@ function getNavItems(role: string): NavItem[] {
     case "VM":
       return [
         dashboardItem,
+        { label: "Data Vendor", href: "/dashboard/vendor", icon: <Building2 size={20} /> },
         { label: "Approval Akun", href: "/dashboard/approval-akun", icon: <UserCheck size={20} /> },
         { label: "Data Mitra OS", href: "/dashboard/mitra", icon: <Users size={20} /> },
         { label: "Data Absensi", href: "/dashboard/riwayat-absensi", icon: <History size={20} /> },

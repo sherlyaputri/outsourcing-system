@@ -1,5 +1,3 @@
-import { redirect } from "next/navigation";
+import { VendorManagementPage } from "@/components/dashboard/feature-pages";
 
-export default function VendorSelectionPage() {
-  redirect("/dashboard/request-os");
-}
+export default VendorManagementPage;

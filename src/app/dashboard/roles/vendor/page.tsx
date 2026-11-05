@@ -14,21 +14,25 @@ export default function VendorDashboardPage() {
             title="Total Mitra OS"
             value={stats.totalMitra || 0}
             icon={<Users size={24} />}
+            href="/dashboard/mitra"
           />
           <StatCard
             title="Total Klaim"
             value={stats.totalKlaim || 0}
             icon={<ClipboardList size={24} />}
+            href="/dashboard/klaim"
           />
           <StatCard
             title="Total Invoice"
             value={stats.totalInvoice || 0}
             icon={<Receipt size={24} />}
+            href="/dashboard/invoice"
           />
           <StatCard
             title="Pending Akun"
             value={stats.pendingAccountReqs || 0}
             icon={<UserPlus size={24} />}
+            href="/dashboard/request-os"
           />
         </div>
       )}

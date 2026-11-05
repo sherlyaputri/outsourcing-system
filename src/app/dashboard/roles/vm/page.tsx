@@ -21,31 +21,37 @@ export default function VMDashboardPage() {
             title="Vendor Aktif"
             value={stats.totalVendor || 0}
             icon={<Building2 size={24} />}
+            href="/dashboard/vendor"
           />
           <StatCard
             title="Mitra OS Aktif"
             value={stats.totalMitra || 0}
             icon={<Users size={24} />}
+            href="/dashboard/mitra"
           />
           <StatCard
             title="Pending Approval"
             value={stats.pendingApprovals || 0}
             icon={<CheckCircle size={24} />}
+            href="/dashboard/approval-akun"
           />
           <StatCard
             title="Request OS"
             value={stats.pendingRequests || 0}
             icon={<FileText size={24} />}
+            href="/dashboard/request-os"
           />
           <StatCard
             title="Klaim Pending"
             value={stats.totalKlaim || 0}
             icon={<ClipboardList size={24} />}
+            href="/dashboard/klaim"
           />
           <StatCard
             title="Invoice Pending"
             value={stats.totalInvoice || 0}
             icon={<Receipt size={24} />}
+            href="/dashboard/invoice"
           />
         </div>
       )}

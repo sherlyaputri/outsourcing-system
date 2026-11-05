@@ -225,6 +225,12 @@ export async function PATCH(req: NextRequest) {
             where: { id: accountReq.candidate.id },
             data: { status: "ACTIVATED" },
           });
+          if (accountReq.candidate.vendorEmployeeId) {
+            await tx.vendorEmployee.update({
+              where: { id: accountReq.candidate.vendorEmployeeId },
+              data: { status: "HIRED" },
+            });
+          }
 
           const updatedRequest = await tx.accountRequest.update({
             where: { id: requestId },
@@ -276,6 +282,12 @@ export async function PATCH(req: NextRequest) {
           where: { id: accountReq.candidate.id },
           data: { status: "DITOLAK" },
         });
+        if (accountReq.candidate.vendorEmployeeId) {
+          await tx.vendorEmployee.update({
+            where: { id: accountReq.candidate.vendorEmployeeId },
+            data: { status: "ACTIVE" },
+          });
+        }
       }
       const updatedRequest = await tx.accountRequest.update({
         where: { id: requestId },

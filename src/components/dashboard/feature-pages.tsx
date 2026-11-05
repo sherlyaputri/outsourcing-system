@@ -20,6 +20,9 @@ interface Vendor {
   id: string;
   name: string;
   status: string;
+  address?: string | null;
+  phone?: string | null;
+  email?: string | null;
   _count?: { users: number };
 }
 
@@ -112,6 +115,25 @@ interface CandidateDraft {
   kecamatan: string;
   kabKota: string;
   provinsi: string;
+}
+
+interface VendorEmployee {
+  id: string;
+  status: string;
+  name: string;
+  nik: string;
+  email: string;
+  phone: string;
+  alamat: string;
+  kelurahan: string;
+  kecamatan: string;
+  kabKota: string;
+  provinsi: string;
+}
+
+interface CandidateSubmissionDraft extends CandidateDraft {
+  source: "NEW" | "EMPLOYEE";
+  employeeId: string;
 }
 
 interface Region {
@@ -942,6 +964,123 @@ function CandidateFields({
   );
 }
 
+export function VendorEmployeesPage() {
+  const employees = useApiData<VendorEmployee[]>("/api/vendor-employee", []);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [draft, setDraft] = useState<CandidateDraft>(emptyCandidate());
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  function updateDraft(_index: number, field: keyof CandidateDraft, value: string | File | null) {
+    setDraft((current) => ({ ...current, [field]: value }));
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    if (!draft.fotoKtp || !draft.fotoSim) {
+      setError("Foto KTP dan SIM wajib diunggah untuk data karyawan.");
+      return;
+    }
+    if (draft.fotoKtp.size > 5 * 1024 * 1024 || draft.fotoSim.size > 5 * 1024 * 1024) {
+      setError("Ukuran setiap foto maksimal 5 MB.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await sendJson("/api/vendor-employee", "POST", {
+        ...draft,
+        fotoKtp: await readImage(draft.fotoKtp),
+        fotoSim: await readImage(draft.fotoSim),
+      });
+      setDraft(emptyCandidate());
+      setDialogOpen(false);
+      employees.reload();
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : "Gagal menyimpan data karyawan.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <FeaturePage
+      title="Data Karyawan"
+      description="Kelola data karyawan Vendor yang dapat diajukan sebagai kandidat untuk Request OS."
+      roles={["VENDOR"]}
+    >
+      <div className="flex justify-end">
+        <Button onClick={() => { setError(null); setDialogOpen(true); }}>Tambah Karyawan</Button>
+      </div>
+      <Card><CardContent className="overflow-x-auto p-0">
+        <LoadingError loading={employees.loading} error={employees.error} empty={!employees.data.length} />
+        {!employees.loading && !employees.error && employees.data.length > 0 && (
+          <DataTable headers={["Nama", "NIK", "Email", "No. HP", "Alamat", "Status"]}>
+            {employees.data.map((employee) => (
+              <TableRow key={employee.id}>
+                <TableCell>{employee.name}</TableCell>
+                <TableCell>{employee.nik}</TableCell>
+                <TableCell>{employee.email}</TableCell>
+                <TableCell>{employee.phone}</TableCell>
+                <TableCell>{[employee.provinsi, employee.kabKota, employee.kecamatan, employee.kelurahan, employee.alamat].filter(Boolean).join(", ")}</TableCell>
+                <TableCell><StatusBadge status={employee.status} /></TableCell>
+              </TableRow>
+            ))}
+          </DataTable>
+        )}
+      </CardContent></Card>
+      {dialogOpen && (
+        <Dialog open onOpenChange={(open) => { if (!open && !saving) setDialogOpen(false); }}>
+          <DialogHeader><DialogTitle>Tambah Data Karyawan</DialogTitle></DialogHeader>
+          <DialogContent>
+            <form onSubmit={submit} className="space-y-4">
+              <CandidateFields candidate={draft} index={0} update={updateDraft} />
+              <p className="text-xs text-muted-foreground">
+                Data ini tersimpan sebagai roster Vendor, bukan akun Mitra OS. Akun Mitra dibuat setelah kandidat lolos seleksi dan diaktivasi VM.
+              </p>
+              <FormError error={error} />
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" disabled={saving} onClick={() => setDialogOpen(false)}>Batal</Button>
+                <Button type="submit" disabled={saving}>{saving ? "Menyimpan..." : "Simpan Karyawan"}</Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
+    </FeaturePage>
+  );
+}
+
+export function VendorManagementPage() {
+  const vendors = useApiData<Vendor[]>("/api/vendor", []);
+
+  return (
+    <FeaturePage
+      title="Data Vendor"
+      description="Daftar vendor OS dan status kerja sama."
+      roles={["VM"]}
+    >
+      <Card><CardContent className="overflow-x-auto p-0">
+        <LoadingError loading={vendors.loading} error={vendors.error} empty={!vendors.data.length} />
+        {!vendors.loading && !vendors.error && vendors.data.length > 0 && (
+          <DataTable headers={["Nama Vendor", "Email", "Telepon", "Jumlah Mitra OS", "Status"]}>
+            {vendors.data.map((vendor) => (
+              <TableRow key={vendor.id}>
+                <TableCell className="font-medium">{vendor.name}</TableCell>
+                <TableCell>{vendor.email || "-"}</TableCell>
+                <TableCell>{vendor.phone || "-"}</TableCell>
+                <TableCell>{vendor._count?.users || 0}</TableCell>
+                <TableCell><StatusBadge status={vendor.status} /></TableCell>
+              </TableRow>
+            ))}
+          </DataTable>
+        )}
+      </CardContent></Card>
+    </FeaturePage>
+  );
+}
+
 function VendorCandidateForm({
   request,
   onSubmitted,
@@ -951,7 +1090,10 @@ function VendorCandidateForm({
   onSubmitted: () => void;
   onClose: () => void;
 }) {
-  const [candidates, setCandidates] = useState<CandidateDraft[]>([emptyCandidate()]);
+  const employees = useApiData<VendorEmployee[]>("/api/vendor-employee?available=true", []);
+  const [candidates, setCandidates] = useState<CandidateSubmissionDraft[]>([
+    { ...emptyCandidate(), source: "NEW", employeeId: "" },
+  ]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -968,10 +1110,14 @@ function VendorCandidateForm({
       setError("Vendor dapat mengirim 1 sampai 10 kandidat untuk setiap request.");
       return;
     }
+    if (candidates.some((candidate) => candidate.source === "EMPLOYEE" && !candidate.employeeId)) {
+      setError("Pilih data karyawan untuk setiap kandidat yang menggunakan roster.");
+      return;
+    }
     if (!window.confirm(`Anda akan submit ${candidates.length} kandidat. Lanjutkan?`)) return;
     setSaving(true);
     try {
-      for (const candidate of candidates) {
+      for (const candidate of candidates.filter((item) => item.source === "NEW")) {
         if (!candidate.fotoKtp || !candidate.fotoSim) {
           throw new Error("Foto KTP dan SIM wajib diunggah untuk setiap kandidat.");
         }
@@ -980,11 +1126,24 @@ function VendorCandidateForm({
         }
       }
 
-      const payload = await Promise.all(candidates.map(async (candidate) => ({
-        ...candidate,
-        fotoKtp: await readImage(candidate.fotoKtp!),
-        fotoSim: await readImage(candidate.fotoSim!),
-      })));
+      const payload = await Promise.all(candidates.map(async (candidate) => {
+        if (candidate.source === "EMPLOYEE") return { employeeId: candidate.employeeId };
+        return {
+          name: candidate.name,
+          nik: candidate.nik,
+          fotoKtp: await readImage(candidate.fotoKtp!),
+          jenisSim: candidate.jenisSim,
+          noSim: candidate.noSim,
+          fotoSim: await readImage(candidate.fotoSim!),
+          phone: candidate.phone,
+          email: candidate.email,
+          alamat: candidate.alamat,
+          kelurahan: candidate.kelurahan,
+          kecamatan: candidate.kecamatan,
+          kabKota: candidate.kabKota,
+          provinsi: candidate.provinsi,
+        };
+      }));
       await sendJson("/api/candidate", "POST", { osRequestId: request.id, candidates: payload });
       onSubmitted();
     } catch (submitError) {
@@ -1013,7 +1172,75 @@ function VendorCandidateForm({
         <form onSubmit={submit} className="space-y-6">
           {candidates.map((candidate, index) => (
             <div key={index} className="space-y-2">
-              <CandidateFields candidate={candidate} index={index} update={updateCandidate} />
+              <fieldset className="rounded-md border p-4">
+                <legend className="px-1 text-sm font-medium">Kandidat {index + 1}</legend>
+                <div className="mb-4 grid grid-cols-2 gap-3">
+                  <label className="flex cursor-pointer items-center gap-2 rounded-md border p-3 text-sm">
+                    <input
+                      type="radio"
+                      name={`candidate-source-${index}`}
+                      checked={candidate.source === "EMPLOYEE"}
+                      onChange={() => setCandidates((current) => current.map((item, itemIndex) => (
+                        itemIndex === index ? { ...item, source: "EMPLOYEE", employeeId: "" } : item
+                      )))}
+                    />
+                    Pilih dari data karyawan
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-2 rounded-md border p-3 text-sm">
+                    <input
+                      type="radio"
+                      name={`candidate-source-${index}`}
+                      checked={candidate.source === "NEW"}
+                      onChange={() => setCandidates((current) => current.map((item, itemIndex) => (
+                        itemIndex === index ? { ...item, source: "NEW", employeeId: "" } : item
+                      )))}
+                    />
+                    Isi data baru
+                  </label>
+                </div>
+                {candidate.source === "EMPLOYEE" ? (
+                  <div className="space-y-3">
+                    <label className="block space-y-1 text-sm">
+                      Pilih karyawan<RequiredMark />
+                      <select
+                        className={fieldClass}
+                        value={candidate.employeeId}
+                        disabled={employees.loading || employees.data.length === 0}
+                        onChange={(event) => setCandidates((current) => current.map((item, itemIndex) => (
+                          itemIndex === index ? { ...item, employeeId: event.target.value } : item
+                        )))}
+                        required
+                      >
+                        <option value="">
+                          {employees.loading ? "Memuat data karyawan..." : "Pilih karyawan"}
+                        </option>
+                        {employees.data.map((employee) => (
+                          <option key={employee.id} value={employee.id}>
+                            {employee.name} — {employee.nik}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {employees.error && <FormError error={`Data karyawan gagal dimuat: ${employees.error}`} />}
+                    {!employees.loading && employees.data.length === 0 && !employees.error && (
+                      <p className="text-sm text-muted-foreground">
+                        Belum ada data karyawan yang tersedia. Tambahkan melalui menu Data Karyawan.
+                      </p>
+                    )}
+                    {candidate.employeeId && (() => {
+                      const employee = employees.data.find((item) => item.id === candidate.employeeId);
+                      return employee ? (
+                        <div className="rounded-md bg-muted p-3 text-sm">
+                          <p>{employee.email} · {employee.phone}</p>
+                          <p>{[employee.provinsi, employee.kabKota, employee.kecamatan, employee.kelurahan, employee.alamat].filter(Boolean).join(", ")}</p>
+                        </div>
+                      ) : null;
+                    })()}
+                  </div>
+                ) : (
+                  <CandidateFields candidate={candidate} index={index} update={updateCandidate} />
+                )}
+              </fieldset>
               {candidates.length > 1 && (
                 <Button
                   type="button"
@@ -1037,7 +1264,7 @@ function VendorCandidateForm({
                 type="button"
                 variant="outline"
                 disabled={saving || candidates.length >= 10}
-                onClick={() => setCandidates((current) => [...current, emptyCandidate()])}
+                onClick={() => setCandidates((current) => [...current, { ...emptyCandidate(), source: "NEW", employeeId: "" }])}
               >
                 + Tambah Kandidat
               </Button>
@@ -1293,6 +1520,7 @@ export function OSRequestPage() {
   const [saving, setSaving] = useState(false);
   const [requestType, setRequestType] = useState("PENAMBAHAN");
   const [selectedMitraId, setSelectedMitraId] = useState("");
+  const [requestFormOpen, setRequestFormOpen] = useState(false);
   const [selectedVendors, setSelectedVendors] = useState<Record<string, string>>({});
   const [assigningId, setAssigningId] = useState<string | null>(null);
   const [activeCandidateRequestId, setActiveCandidateRequestId] = useState<string | null>(null);
@@ -1374,6 +1602,7 @@ export function OSRequestPage() {
       formElement.reset();
       setRequestType("PENAMBAHAN");
       setSelectedMitraId("");
+      setRequestFormOpen(false);
       requests.reload();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Gagal mengirim request.");
@@ -1488,7 +1717,18 @@ export function OSRequestPage() {
     <FeaturePage title="Request OS" description="Ajukan atau pantau permintaan tenaga outsourcing." roles={["SM", "VM", "VENDOR"]}>
       <FormError error={error} />
       {session?.user.role === "SM" && (
-        <Card><CardHeader><CardTitle className="text-lg">Buat Request OS</CardTitle></CardHeader><CardContent>
+        <>
+          <div className="flex justify-end">
+            <Button onClick={() => { setError(null); setRequestFormOpen(true); }}>
+              Buat Request OS
+            </Button>
+          </div>
+          <Dialog
+            open={requestFormOpen}
+            onOpenChange={(open) => { if (!saving) setRequestFormOpen(open); }}
+          >
+            <DialogHeader><DialogTitle>Buat Request OS</DialogTitle></DialogHeader>
+            <DialogContent>
           <p className="mb-4 text-sm text-muted-foreground">Field bertanda <RequiredMark /> wajib diisi.</p>
           <form id="os-request-form" onSubmit={submit} className="grid gap-4 md:grid-cols-2">
             <label className="space-y-1 text-sm">
@@ -1548,11 +1788,18 @@ export function OSRequestPage() {
             {needsMitraId && mitras.error && <FormError error={`Data Mitra OS gagal dimuat: ${mitras.error}`} />}
           </form>
           <div className="mt-6 flex justify-end border-t pt-4">
-            <Button type="submit" form="os-request-form" disabled={saving || (needsMitraId && mitras.loading)}>
-              {saving ? "Mengirim..." : "Kirim Request"}
-            </Button>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" disabled={saving} onClick={() => setRequestFormOpen(false)}>
+                Batal
+              </Button>
+              <Button type="submit" form="os-request-form" disabled={saving || (needsMitraId && mitras.loading)}>
+                {saving ? "Mengirim..." : "Kirim Request"}
+              </Button>
+            </div>
           </div>
-        </CardContent></Card>
+            </DialogContent>
+          </Dialog>
+        </>
       )}
       {["SM", "VENDOR", "VM"].includes(session?.user.role || "") ? (
         <>

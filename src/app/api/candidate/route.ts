@@ -5,6 +5,24 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 class CandidateQuotaReachedError extends Error {}
+class VendorEmployeeUnavailableError extends Error {}
+
+interface CandidatePayload {
+  name: string;
+  nik: string;
+  fotoKtp: string;
+  jenisSim: string;
+  noSim: string;
+  fotoSim: string;
+  phone: string;
+  email: string;
+  alamat: string;
+  kelurahan: string;
+  kecamatan: string;
+  kabKota: string;
+  provinsi: string;
+  vendorEmployeeId: string | null;
+}
 
 const maxImageBytes = 5 * 1024 * 1024;
 const maxCandidatesPerSubmission = 10;
@@ -18,12 +36,21 @@ function isValidImage(value: unknown): value is string {
   return Boolean(match && Buffer.from(match[1], "base64").length <= maxImageBytes);
 }
 
+function isCandidatePayload(candidate: Record<string, unknown>): candidate is Record<string, unknown> & CandidatePayload {
+  return [
+    "name", "nik", "fotoKtp", "jenisSim", "noSim", "fotoSim", "phone", "email",
+    "alamat", "kelurahan", "kecamatan", "kabKota", "provinsi",
+  ].every((field) => typeof candidate[field] === "string")
+    && (candidate.vendorEmployeeId === null || typeof candidate.vendorEmployeeId === "string");
+}
+
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
     if (!session || session.user.role !== "VENDOR" || !session.user.vendorId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const vendorId = session.user.vendorId;
 
     const body = await req.json();
     const { osRequestId, candidates } = body;
@@ -36,11 +63,15 @@ export async function POST(req: NextRequest) {
     ) {
       return NextResponse.json({ error: "Data kandidat tidak valid (1-10 kandidat per pengiriman)." }, { status: 400 });
     }
+    if (candidates.some((candidate) => !candidate || typeof candidate !== "object" || Array.isArray(candidate))) {
+      return NextResponse.json({ error: "Format data kandidat tidak valid." }, { status: 400 });
+    }
+    const candidateEntries = candidates as Record<string, unknown>[];
 
     const osRequest = await prisma.oSRequest.findFirst({
       where: {
         id: osRequestId,
-        vendorId: session.user.vendorId,
+        vendorId,
         status: "VENDOR_SELECTED",
       },
       select: { id: true, jumlah: true },
@@ -49,12 +80,58 @@ export async function POST(req: NextRequest) {
     if (!osRequest) {
       return NextResponse.json({ error: "Request tidak ditemukan atau tidak dapat menerima kandidat." }, { status: 404 });
     }
+
+    const employeeIds = candidateEntries.flatMap((candidate) =>
+      isNonEmptyString(candidate.employeeId) ? [candidate.employeeId] : [],
+    );
+    if (new Set(employeeIds).size !== employeeIds.length) {
+      return NextResponse.json({ error: "Data karyawan yang sama tidak boleh dipilih lebih dari sekali." }, { status: 400 });
+    }
+
+    const employees = employeeIds.length > 0
+      ? await prisma.vendorEmployee.findMany({
+          where: {
+            id: { in: employeeIds },
+            vendorId,
+            status: "ACTIVE",
+            candidates: { none: { status: { in: ["KANDIDAT", "TERPILIH", "ACTIVATED"] } } },
+          },
+        })
+      : [];
+    if (employees.length !== employeeIds.length) {
+      return NextResponse.json({ error: "Salah satu data karyawan tidak tersedia atau sudah diajukan." }, { status: 409 });
+    }
+    const employeesById = new Map(employees.map((employee) => [employee.id, employee]));
+    const submittedCandidates = candidateEntries.map((candidate) => {
+      if (!isNonEmptyString(candidate.employeeId)) {
+        return { ...candidate, vendorEmployeeId: null };
+      }
+      const employee = employeesById.get(candidate.employeeId);
+      if (!employee) return candidate;
+      return {
+        name: employee.name,
+        nik: employee.nik,
+        fotoKtp: employee.fotoKtp,
+        jenisSim: employee.jenisSim,
+        noSim: employee.noSim,
+        fotoSim: employee.fotoSim,
+        phone: employee.phone,
+        email: employee.email,
+        alamat: employee.alamat,
+        kelurahan: employee.kelurahan,
+        kecamatan: employee.kecamatan,
+        kabKota: employee.kabKota,
+        provinsi: employee.provinsi,
+        vendorEmployeeId: employee.id,
+      };
+    });
+
     const existingCandidates = await prisma.candidate.count({ where: { osRequestId } });
     if (existingCandidates > 0) {
       return NextResponse.json({ error: "Data kandidat untuk request ini sudah pernah dikirim." }, { status: 409 });
     }
 
-    for (const candidate of candidates) {
+    for (const candidate of submittedCandidates) {
       if (!candidate || typeof candidate !== "object") {
         return NextResponse.json({ error: "Format data kandidat tidak valid." }, { status: 400 });
       }
@@ -67,7 +144,7 @@ export async function POST(req: NextRequest) {
       if (!isValidImage(candidate.fotoKtp)) {
         return NextResponse.json({ error: "Foto KTP wajib berupa JPG/PNG dan maksimal 5 MB." }, { status: 400 });
       }
-      if (!["A", "B1", "B2", "C", "D"].includes(candidate.jenisSim)) {
+      if (typeof candidate.jenisSim !== "string" || !["A", "B1", "B2", "C", "D"].includes(candidate.jenisSim)) {
         return NextResponse.json({ error: "Pilih jenis SIM yang tersedia." }, { status: 400 });
       }
       if (typeof candidate.noSim !== "string" || !/^\d+$/.test(candidate.noSim.trim())) {
@@ -99,7 +176,28 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const emails = candidates.map((candidate: { email: string }) => candidate.email.trim().toLowerCase());
+    const normalizedCandidates: CandidatePayload[] = [];
+    for (const candidate of submittedCandidates) {
+      if (!isCandidatePayload(candidate)) {
+        return NextResponse.json({ error: "Format data kandidat tidak valid." }, { status: 400 });
+      }
+      normalizedCandidates.push({
+        ...candidate,
+        name: candidate.name.trim(),
+        nik: candidate.nik.trim(),
+        jenisSim: candidate.jenisSim.trim(),
+        noSim: candidate.noSim.trim(),
+        phone: candidate.phone.trim(),
+        email: candidate.email.trim().toLowerCase(),
+        alamat: candidate.alamat.trim(),
+        kelurahan: candidate.kelurahan.trim(),
+        kecamatan: candidate.kecamatan.trim(),
+        kabKota: candidate.kabKota.trim(),
+        provinsi: candidate.provinsi.trim(),
+      });
+    }
+
+    const emails = normalizedCandidates.map((candidate) => candidate.email);
     if (new Set(emails).size !== emails.length) {
       return NextResponse.json({ error: "Email setiap kandidat harus berbeda." }, { status: 400 });
     }
@@ -124,7 +222,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Email kandidat sudah terdaftar atau sedang diajukan." }, { status: 409 });
     }
 
-    const totalPhotoBytes = candidates.reduce((total: number, candidate: { fotoKtp: string; fotoSim: string }) => (
+    const totalPhotoBytes = normalizedCandidates.reduce((total, candidate) => (
       total +
       Buffer.from(candidate.fotoKtp.split(",")[1], "base64").length +
       Buffer.from(candidate.fotoSim.split(",")[1], "base64").length
@@ -137,22 +235,33 @@ export async function POST(req: NextRequest) {
       const reservedRequest = await tx.oSRequest.updateMany({
         where: {
           id: osRequestId,
-          vendorId: session.user.vendorId,
+          vendorId,
           status: "VENDOR_SELECTED",
         },
         data: { status: "WAITING_SELECTION" },
       });
       if (reservedRequest.count !== 1) return false;
 
-      for (let index = 0; index < candidates.length; index += 1) {
-        const candidate = candidates[index];
+      for (let index = 0; index < normalizedCandidates.length; index += 1) {
+        const candidate = normalizedCandidates[index];
+        if (candidate.vendorEmployeeId) {
+          const reservedEmployee = await tx.vendorEmployee.updateMany({
+            where: {
+              id: candidate.vendorEmployeeId,
+              vendorId,
+              status: "ACTIVE",
+            },
+            data: { status: "IN_SELECTION" },
+          });
+          if (reservedEmployee.count !== 1) throw new VendorEmployeeUnavailableError();
+        }
         const accountRequest = await tx.accountRequest.create({
           data: {
             type: "MITRA",
-            name: candidate.name.trim(),
+            name: candidate.name,
             email: emails[index],
-            phone: candidate.phone.trim(),
-            vendorId: session.user.vendorId,
+            phone: candidate.phone,
+            vendorId,
             requesterId: session.user.id,
             status: "WAITING_SELECTION",
           },
@@ -162,19 +271,20 @@ export async function POST(req: NextRequest) {
           data: {
             osRequestId,
             accountRequestId: accountRequest.id,
-            name: candidate.name.trim(),
-            nik: candidate.nik.trim(),
+            name: candidate.name,
+            nik: candidate.nik,
             fotoKtp: candidate.fotoKtp,
-            jenisSim: candidate.jenisSim.trim(),
-            noSim: candidate.noSim.trim(),
+            jenisSim: candidate.jenisSim,
+            noSim: candidate.noSim,
             fotoSim: candidate.fotoSim,
-            phone: candidate.phone.trim(),
+            phone: candidate.phone,
             email: emails[index],
-            alamat: candidate.alamat.trim(),
-            kelurahan: candidate.kelurahan.trim(),
-            kecamatan: candidate.kecamatan.trim(),
-            kabKota: candidate.kabKota.trim(),
-            provinsi: candidate.provinsi.trim(),
+            alamat: candidate.alamat,
+            kelurahan: candidate.kelurahan,
+            kecamatan: candidate.kecamatan,
+            kabKota: candidate.kabKota,
+            provinsi: candidate.provinsi,
+            vendorEmployeeId: candidate.vendorEmployeeId,
           },
         });
       }
@@ -186,9 +296,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Request ini sudah menerima data kandidat." }, { status: 409 });
     }
 
-    return NextResponse.json({ count: candidates.length });
+    return NextResponse.json({ count: normalizedCandidates.length });
   } catch (error) {
     console.error("Candidate POST error:", error);
+    if (error instanceof VendorEmployeeUnavailableError) {
+      return NextResponse.json({ error: "Data karyawan sudah dipakai untuk pengajuan lain." }, { status: 409 });
+    }
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
@@ -217,6 +330,7 @@ export async function PATCH(req: NextRequest) {
           id: true,
           osRequestId: true,
           accountRequestId: true,
+          vendorEmployeeId: true,
           osRequest: { select: { jumlah: true } },
         },
       });
@@ -258,7 +372,7 @@ export async function PATCH(req: NextRequest) {
         if (acceptedCount >= candidate.osRequest.jumlah) {
           const remainingCandidates = await tx.candidate.findMany({
             where: { osRequestId: candidate.osRequestId, status: "KANDIDAT" },
-            select: { id: true, accountRequestId: true },
+            select: { id: true, accountRequestId: true, vendorEmployeeId: true },
           });
           autoRejectedCount = (await tx.candidate.updateMany({
             where: {
@@ -276,7 +390,23 @@ export async function PATCH(req: NextRequest) {
               data: { status: "REJECTED" },
             });
           }
+          const rejectedEmployeeIds = remainingCandidates
+            .map((remainingCandidate) => remainingCandidate.vendorEmployeeId)
+            .filter((id): id is string => id !== null);
+          if (rejectedEmployeeIds.length > 0) {
+            await tx.vendorEmployee.updateMany({
+              where: { id: { in: rejectedEmployeeIds }, status: "IN_SELECTION" },
+              data: { status: "ACTIVE" },
+            });
+          }
         }
+      }
+
+      if (decision === "REJECTED" && candidate.vendorEmployeeId) {
+        await tx.vendorEmployee.updateMany({
+          where: { id: candidate.vendorEmployeeId, status: "IN_SELECTION" },
+          data: { status: "ACTIVE" },
+        });
       }
 
       const undecidedCount = await tx.candidate.count({

@@ -43,9 +43,10 @@ model Vendor {
 
   users         User[]
   mitraProfiles MitraProfile[]
+  employees     VendorEmployee[]
   claims        Claim[]
   invoices      Invoice[]
-  osRequests    OSRequest[]    @relation("OSRequestVendor")
+  osRequests    OSRequest[]      @relation("OSRequestVendor")
 }
 
 model MitraProfile {
@@ -173,9 +174,37 @@ model Candidate {
   noRekening       String?
   accountRequestId String?         @unique
   accountRequest   AccountRequest? @relation(fields: [accountRequestId], references: [id])
+  vendorEmployeeId String?
+  vendorEmployee   VendorEmployee? @relation(fields: [vendorEmployeeId], references: [id], onDelete: SetNull)
   status           String          @default("KANDIDAT") // KANDIDAT, TERPILIH, DITOLAK, ACTIVATED
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
+}
+
+model VendorEmployee {
+  id         String      @id @default(cuid())
+  vendorId   String
+  vendor     Vendor      @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  name       String
+  nik        String
+  fotoKtp    String      @db.LongText
+  jenisSim   String
+  noSim      String
+  fotoSim    String      @db.LongText
+  phone      String
+  email      String
+  alamat     String      @db.Text
+  kelurahan  String
+  kecamatan  String
+  kabKota    String
+  provinsi   String
+  status     String      @default("ACTIVE")
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  candidates Candidate[]
+
+  @@index([vendorId, status])
+  @@index([email])
 }
 
 model AccountRequest {

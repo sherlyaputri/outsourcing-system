@@ -16,6 +16,7 @@ export default function MitraDashboardPage() {
               title="Total Absensi"
               value={stats.totalAbsensi || 0}
               icon={<Camera size={24} />}
+              href="/dashboard/riwayat-absensi"
             />
             <StatCard
               title="Status Hari Ini"
@@ -26,6 +27,7 @@ export default function MitraDashboardPage() {
                   ? "border-green-200"
                   : "border-yellow-200"
               }
+              href="/dashboard/absensi"
             />
             <StatCard
               title="Jam Check-In"
@@ -38,6 +40,7 @@ export default function MitraDashboardPage() {
                   : "-"
               }
               icon={<Clock size={24} />}
+              href="/dashboard/absensi"
             />
           </div>
           {!stats.sudahAbsenHariIni && (

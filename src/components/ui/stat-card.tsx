@@ -1,4 +1,5 @@
 import React from "react";
+import Link from "next/link";
 import { Card, CardContent } from "./card";
 import { cn } from "@/lib/utils";
 
@@ -8,15 +9,16 @@ interface StatCardProps {
   icon: React.ReactNode;
   description?: string;
   className?: string;
+  href?: string;
   trend?: {
     value: number;
     isPositive: boolean;
   };
 }
 
-export function StatCard({ title, value, icon, description, className, trend }: StatCardProps) {
-  return (
-    <Card className={cn("", className)}>
+export function StatCard({ title, value, icon, description, className, trend, href }: StatCardProps) {
+  const card = (
+    <Card className={cn(href && "h-full transition-colors hover:border-primary/50 hover:bg-muted/30", className)}>
       <CardContent className="p-6">
         <div className="flex items-center justify-between">
           <div>
@@ -35,5 +37,13 @@ export function StatCard({ title, value, icon, description, className, trend }: 
         </div>
       </CardContent>
     </Card>
+  );
+
+  if (!href) return card;
+
+  return (
+    <Link href={href} className="block rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+      {card}
+    </Link>
   );
 }
