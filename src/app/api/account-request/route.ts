@@ -4,9 +4,21 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import bcrypt from "bcryptjs";
-import { randomUUID } from "node:crypto";
+import { randomInt } from "node:crypto";
 
 class CandidateQuotaReachedError extends Error {}
+
+async function generateMitraOsId(tx: Prisma.TransactionClient) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const idMitraOs = `WAXD${randomInt(1_000, 10_000)}`;
+    const existing = await tx.mitraProfile.findFirst({
+      where: { idMitraOs },
+      select: { id: true },
+    });
+    if (!existing) return idMitraOs;
+  }
+  throw new Error("Unable to generate a unique Mitra OS ID");
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -84,20 +96,27 @@ export async function POST(req: NextRequest) {
         where: {
           id: osRequestId,
           vendorId: session.user.vendorId,
-          status: "WAITING_ACTIVATION",
+          status: "WAITING_VENDOR_REQUEST",
         },
         select: { id: true },
       });
       if (!osRequest) return 0;
 
-      return (await tx.accountRequest.updateMany({
+      const requested = await tx.accountRequest.updateMany({
         where: {
           requesterId: session.user.id,
           status: "WAITING_SELECTION",
           candidate: { is: { osRequestId, status: "TERPILIH" } },
         },
         data: { status: "PENDING" },
-      })).count;
+      });
+      if (requested.count > 0) {
+        await tx.oSRequest.update({
+          where: { id: osRequestId },
+          data: { status: "WAITING_ACTIVATION" },
+        });
+      }
+      return requested.count;
     });
 
     if (requestedCount === 0) {
@@ -187,7 +206,7 @@ export async function PATCH(req: NextRequest) {
             data: {
               userId: user.id,
               vendorId: accountReq.vendorId,
-              idMitraOs: `MOS-${randomUUID().toUpperCase()}`,
+              idMitraOs: await generateMitraOsId(tx),
               nik: accountReq.candidate.nik,
               fotoKtp: accountReq.candidate.fotoKtp,
               jenisSim: accountReq.candidate.jenisSim,

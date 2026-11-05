@@ -168,6 +168,7 @@ function getOSRequestStatus(status: string) {
     VENDOR_SELECTED: "OS_WAITING_VENDOR_DATA",
     IN_PROGRESS: "OS_WAITING_SELECTION",
     WAITING_SELECTION: "OS_WAITING_SELECTION",
+    WAITING_VENDOR_REQUEST: "OS_WAITING_VENDOR_REQUEST",
     WAITING_ACTIVATION: "OS_WAITING_ACTIVATION",
     NOT_SELECTED: "OS_NOT_SELECTED",
   };
@@ -308,6 +309,7 @@ export function MitraManagementPage() {
   const { data: session } = useSession();
   const mitras = useApiData<Mitra[]>("/api/mitra", []);
   const [editingMitra, setEditingMitra] = useState<Mitra | null>(null);
+  const [detailMitra, setDetailMitra] = useState<Mitra | null>(null);
   return (
     <FeaturePage title="Data Mitra OS" description="Daftar mitra OS dan ID yang digunakan untuk request pergantian atau pengurangan." roles={["VENDOR", "VM", "SM"]}>
       <Card><CardContent className="p-0">
@@ -350,7 +352,12 @@ export function MitraManagementPage() {
                       </div>
                     </details>
                   )}
-                  {session?.user.role !== "VENDOR" && "-"}
+                  {session?.user.role === "SM" && (
+                    <Button size="sm" variant="outline" onClick={() => setDetailMitra(mitra)}>
+                      Lihat Detail
+                    </Button>
+                  )}
+                  {session?.user.role !== "VENDOR" && session?.user.role !== "SM" && "-"}
                   {session?.user.role === "VENDOR" && (
                     <Button className="mt-2" size="sm" variant="outline" onClick={() => setEditingMitra(mitra)}>
                       Edit data
@@ -372,6 +379,69 @@ export function MitraManagementPage() {
             mitras.reload();
           }}
         />
+      )}
+      {detailMitra && (
+        <Dialog open onOpenChange={(open) => { if (!open) setDetailMitra(null); }}>
+          <DialogHeader>
+            <DialogTitle>Detail Mitra OS — {detailMitra.name}</DialogTitle>
+          </DialogHeader>
+          <DialogContent className="space-y-4">
+            <div className="grid gap-3 text-sm sm:grid-cols-2">
+              <p><span className="font-medium">ID Mitra OS:</span> {detailMitra.mitraProfile?.idMitraOs || "-"}</p>
+              <p><span className="font-medium">NIK:</span> {detailMitra.mitraProfile?.nik || "-"}</p>
+              <p><span className="font-medium">Email:</span> {detailMitra.email}</p>
+              <p><span className="font-medium">No. HP:</span> {detailMitra.phone || "-"}</p>
+              <p><span className="font-medium">Tempat, tanggal lahir:</span> {[detailMitra.mitraProfile?.tempatLahir, detailMitra.mitraProfile?.tanggalLahir?.slice(0, 10)].filter(Boolean).join(", ") || "-"}</p>
+              <p><span className="font-medium">Vendor:</span> {detailMitra.vendor?.name || "-"}</p>
+              <p><span className="font-medium">Posisi:</span> {detailMitra.mitraProfile?.posisi || "-"}</p>
+              <p><span className="font-medium">Penempatan:</span> {detailMitra.mitraProfile?.penempatan || "-"}</p>
+              <p><span className="font-medium">No. BPJS:</span> {detailMitra.mitraProfile?.noBpjs || "-"}</p>
+              <p><span className="font-medium">SIM:</span> {[detailMitra.mitraProfile?.jenisSim, detailMitra.mitraProfile?.noSim].filter(Boolean).join(" · ") || "-"}</p>
+              <p><span className="font-medium">Bank:</span> {detailMitra.mitraProfile?.namaBank || "-"}</p>
+              <p><span className="font-medium">No. rekening:</span> {detailMitra.mitraProfile?.noRekening || "-"}</p>
+              <p className="sm:col-span-2">
+                <span className="font-medium">Alamat:</span>{" "}
+                {[detailMitra.mitraProfile?.provinsi, detailMitra.mitraProfile?.kabKota, detailMitra.mitraProfile?.kecamatan, detailMitra.mitraProfile?.kelurahan, detailMitra.mitraProfile?.alamat]
+                  .filter(Boolean).join(", ") || "-"}
+              </p>
+            </div>
+            {detailMitra.mitraProfile && (
+              <>
+                <div className="flex flex-wrap gap-4">
+                  {detailMitra.mitraProfile.fotoKtp && (
+                    <div className="space-y-1 text-sm">
+                      <p className="font-medium">Foto KTP</p>
+                      <img className="h-36 max-w-full rounded border object-contain" src={detailMitra.mitraProfile.fotoKtp} alt={`Foto KTP ${detailMitra.name}`} />
+                    </div>
+                  )}
+                  {detailMitra.mitraProfile.fotoSim && (
+                    <div className="space-y-1 text-sm">
+                      <p className="font-medium">Foto SIM</p>
+                      <img className="h-36 max-w-full rounded border object-contain" src={detailMitra.mitraProfile.fotoSim} alt={`Foto SIM ${detailMitra.name}`} />
+                    </div>
+                  )}
+                </div>
+                {(detailMitra.mitraProfile.documents?.length || 0) > 0 && (
+                  <div className="space-y-1 text-sm">
+                    <p className="font-medium">Dokumen tambahan</p>
+                    {detailMitra.mitraProfile.documents?.map((document) => (
+                      <p key={document.id}>
+                        <a
+                          className="text-primary underline"
+                          href={`/api/mitra/${detailMitra.id}/documents/${document.id}`}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {document.name}
+                        </a>
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </DialogContent>
+        </Dialog>
       )}
     </FeaturePage>
   );
@@ -427,8 +497,6 @@ function MitraEditDialog({
         noBpjs: form.get("noBpjs"),
         noRekening: form.get("noRekening"),
         namaBank: form.get("namaBank"),
-        penempatan: form.get("penempatan"),
-        posisi: form.get("posisi"),
         documents,
         ...(fotoKtp instanceof File && fotoKtp.size > 0 ? { fotoKtp: await readImage(fotoKtp) } : {}),
         ...(fotoSim instanceof File && fotoSim.size > 0 ? { fotoSim: await readImage(fotoSim) } : {}),
@@ -477,11 +545,11 @@ function MitraEditDialog({
             <label className="space-y-1 text-sm">No. rekening<OptionalMark />
               <input className={fieldClass} name="noRekening" defaultValue={mitra.mitraProfile?.noRekening || ""} />
             </label>
-            <label className="space-y-1 text-sm">Posisi<OptionalMark />
-              <input className={fieldClass} name="posisi" defaultValue={mitra.mitraProfile?.posisi || ""} />
+            <label className="space-y-1 text-sm">Posisi (tidak dapat diubah)
+              <input className={`${fieldClass} cursor-not-allowed bg-muted`} value={mitra.mitraProfile?.posisi || "-"} readOnly />
             </label>
-            <label className="space-y-1 text-sm">Penempatan<OptionalMark />
-              <input className={fieldClass} name="penempatan" defaultValue={mitra.mitraProfile?.penempatan || ""} />
+            <label className="space-y-1 text-sm">Penempatan (tidak dapat diubah)
+              <input className={`${fieldClass} cursor-not-allowed bg-muted`} value={mitra.mitraProfile?.penempatan || "-"} readOnly />
             </label>
             <label className="space-y-1 text-sm">Jenis SIM<OptionalMark />
               <select className={fieldClass} name="jenisSim" defaultValue={mitra.mitraProfile?.jenisSim || ""}>
@@ -1314,6 +1382,108 @@ export function OSRequestPage() {
     }
   }
 
+  const isFinishedRequest = (item: OSRequest) =>
+    ["COMPLETED", "NOT_SELECTED", "REJECTED"].includes(item.status);
+  const pendingRequests = requests.data
+    .filter((item) => !isFinishedRequest(item))
+    .sort((a, b) => Number(b.status === "WAITING_SELECTION") - Number(a.status === "WAITING_SELECTION"));
+  const finishedRequests = requests.data.filter(isFinishedRequest);
+  const activeReviewRequest = requests.data.find((item) => item.id === activeReviewRequestId);
+  const acceptedCandidateCount = activeReviewRequest?.candidates?.filter(
+    (candidate) => candidate.status === "TERPILIH" || candidate.status === "ACTIVATED",
+  ).length || 0;
+  const hasSelectionCapacity = Boolean(
+    activeReviewRequest && acceptedCandidateCount < activeReviewRequest.jumlah,
+  );
+  const tableHeaders = [
+    "Jenis",
+    "Jumlah",
+    "ID Mitra OS",
+    "Posisi",
+    "Wilayah Operasional",
+    "Waktu Kerja",
+    "Pemohon",
+    "Vendor",
+    "Status",
+    ...(session?.user.role === "SM" ? ["Kandidat"] : []),
+    ...(session?.user.role === "VENDOR" ? ["Aksi"] : []),
+  ];
+  const renderRequestRows = (items: OSRequest[]) => (
+    <DataTable headers={tableHeaders}>
+      {items.map((item) => (
+        <TableRow key={item.id}>
+          <TableCell>{item.type}</TableCell>
+          <TableCell>{item.jumlah}</TableCell>
+          <TableCell>{(item.type === "PERGANTIAN" || item.type === "PENGURANGAN") ? item.idMitraOs || item.idPergantian || "-" : "-"}</TableCell>
+          <TableCell>{item.posisi || "-"}</TableCell>
+          <TableCell>{item.penempatan || "-"}</TableCell>
+          <TableCell>{item.waktuKerja || "-"}</TableCell>
+          <TableCell>{item.requester?.name || "-"}</TableCell>
+          <TableCell>
+            {session?.user.role === "VM" && item.status === "APPROVED_COO" ? (
+              <div className="flex min-w-48 gap-2">
+                <select
+                  className={fieldClass}
+                  value={selectedVendors[item.id] || ""}
+                  onChange={(event) => setSelectedVendors({ ...selectedVendors, [item.id]: event.target.value })}
+                >
+                  <option value="">Pilih vendor</option>
+                  {vendors.data.filter((vendor) => vendor.status === "ACTIVE").map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
+                </select>
+                <Button disabled={assigningId === item.id || vendors.loading} onClick={() => assignVendor(item.id)}>
+                  {assigningId === item.id ? "Menyimpan..." : "Pilih"}
+                </Button>
+              </div>
+            ) : item.vendor?.name || "-"}
+          </TableCell>
+          <TableCell><StatusBadge status={getOSRequestStatus(item.status)} /></TableCell>
+          {session?.user.role === "SM" && (
+            <TableCell>
+              {(item.candidates?.length || 0) > 0
+                ? <Button size="sm" variant="outline" onClick={() => setActiveReviewRequestId(item.id)}>Lihat Detail</Button>
+                : "-"}
+            </TableCell>
+          )}
+          {session?.user.role === "VENDOR" && (
+            <TableCell>
+              {item.status === "VENDOR_SELECTED" ? (
+                <Button
+                  variant={activeCandidateRequestId === item.id ? "outline" : "default"}
+                  size="sm"
+                  onClick={() => setActiveCandidateRequestId(activeCandidateRequestId === item.id ? null : item.id)}
+                >
+                  {activeCandidateRequestId === item.id ? "Tutup" : "Isi data"}
+                </Button>
+              ) : item.status === "NOT_SELECTED" ? (
+                <StatusBadge status="OS_NOT_SELECTED" />
+              ) : item.status === "WAITING_SELECTION" || item.status === "IN_PROGRESS" ? (
+                <Button size="sm" variant="outline" disabled>Request akun</Button>
+              ) : item.status === "WAITING_VENDOR_REQUEST" ? (
+                (() => {
+                  const candidates = item.candidates || [];
+                  const hasUndecided = candidates.some((candidate) => candidate.status === "KANDIDAT");
+                  const selected = candidates.filter((candidate) => candidate.status === "TERPILIH");
+                  if (selected.length > 0 && !hasUndecided) {
+                    return (
+                        <Button size="sm" disabled={candidateActionId === item.id} onClick={() => requestCandidateAccounts(item.id)}>
+                        {candidateActionId === item.id ? "Mengirim..." : "Request akun"}
+                      </Button>
+                    );
+                  }
+                  return <Button size="sm" variant="outline" disabled>Menunggu Hasil Seleksi</Button>;
+                })()
+              ) : item.status === "WAITING_ACTIVATION" ? (
+                <Button size="sm" variant="outline" disabled>Menunggu Aktivasi Akun</Button>
+              ) : item.status === "COMPLETED" ? (
+                <StatusBadge status="COMPLETED" />
+              ) : "-"}
+            </TableCell>
+          )}
+        </TableRow>
+      ))}
+    </DataTable>
+  );
+
   return (
     <FeaturePage title="Request OS" description="Ajukan atau pantau permintaan tenaga outsourcing." roles={["SM", "VM", "VENDOR"]}>
       <FormError error={error} />
@@ -1384,105 +1554,32 @@ export function OSRequestPage() {
           </div>
         </CardContent></Card>
       )}
-      <Card><CardContent className="p-0">
-        <LoadingError loading={requests.loading} error={requests.error} empty={!requests.data.length} />
-        {!requests.loading && !requests.error && requests.data.length > 0 && (
-          <DataTable headers={[
-            "Jenis",
-            "Jumlah",
-            "ID Mitra OS",
-            "Posisi",
-            "Wilayah Operasional",
-            "Waktu Kerja",
-            "Pemohon",
-            "Vendor",
-            "Status",
-            ...(session?.user.role === "SM" ? ["Kandidat"] : []),
-            ...(session?.user.role === "VENDOR" ? ["Aksi"] : []),
-          ]}>
-            {requests.data.map((item) => (
-              <TableRow key={item.id}>
-                <TableCell>{item.type}</TableCell>
-                <TableCell>{item.jumlah}</TableCell>
-                <TableCell>{(item.type === "PERGANTIAN" || item.type === "PENGURANGAN") ? item.idMitraOs || item.idPergantian || "-" : "-"}</TableCell>
-                <TableCell>{item.posisi || "-"}</TableCell>
-                <TableCell>{item.penempatan || "-"}</TableCell>
-                <TableCell>{item.waktuKerja || "-"}</TableCell>
-                <TableCell>{item.requester?.name || "-"}</TableCell>
-                <TableCell>
-                  {session?.user.role === "VM" && item.status === "APPROVED_COO" ? (
-                    <div className="flex min-w-48 gap-2">
-                      <select
-                        className={fieldClass}
-                        value={selectedVendors[item.id] || ""}
-                        onChange={(event) => setSelectedVendors({ ...selectedVendors, [item.id]: event.target.value })}
-                      >
-                        <option value="">Pilih vendor</option>
-                        {vendors.data.filter((vendor) => vendor.status === "ACTIVE").map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
-                      </select>
-                      <Button disabled={assigningId === item.id || vendors.loading} onClick={() => assignVendor(item.id)}>
-                        {assigningId === item.id ? "Menyimpan..." : "Pilih"}
-                      </Button>
-                    </div>
-                  ) : item.vendor?.name || "-"}
-                </TableCell>
-                <TableCell><StatusBadge status={getOSRequestStatus(item.status)} /></TableCell>
-                {session?.user.role === "SM" && (
-                  <TableCell>
-                    {(item.candidates?.length || 0) > 0
-                      ? <Button size="sm" variant="outline" onClick={() => setActiveReviewRequestId(item.id)}>Lihat Detail</Button>
-                      : "-"}
-                  </TableCell>
-                )}
-                {session?.user.role === "VENDOR" && (
-                  <TableCell>
-                    {item.status === "VENDOR_SELECTED" ? (
-                      <Button
-                        variant={activeCandidateRequestId === item.id ? "outline" : "default"}
-                        size="sm"
-                        onClick={() => setActiveCandidateRequestId(
-                          activeCandidateRequestId === item.id ? null : item.id,
-                        )}
-                      >
-                        {activeCandidateRequestId === item.id ? "Tutup" : "Isi data"}
-                      </Button>
-                    ) : item.status === "NOT_SELECTED" ? (
-                      <StatusBadge status="OS_NOT_SELECTED" />
-                    ) : item.status === "WAITING_SELECTION" || item.status === "IN_PROGRESS" ? (
-                      <Button size="sm" variant="outline" disabled>
-                        Request akun
-                      </Button>
-                    ) : item.status === "WAITING_ACTIVATION" ? (
-                      (() => {
-                        const candidates = item.candidates || [];
-                        const hasUndecided = candidates.some((candidate) => candidate.status === "KANDIDAT");
-                        const selected = candidates.filter((candidate) => candidate.status === "TERPILIH");
-                        const canRequest = selected.some((candidate) => candidate.accountRequest?.status === "WAITING_SELECTION");
-                        const requestSent = selected.length > 0 && selected.every(
-                          (candidate) => candidate.accountRequest?.status !== "WAITING_SELECTION",
-                        );
-                        if (canRequest && !hasUndecided) {
-                          return (
-                            <Button size="sm" disabled={candidateActionId === item.id} onClick={() => requestCandidateAccounts(item.id)}>
-                              {candidateActionId === item.id ? "Mengirim..." : "Request akun"}
-                            </Button>
-                          );
-                        }
-                        if (requestSent) {
-                          return <Button size="sm" variant="outline" disabled>Menunggu Aktivasi Akun</Button>;
-                        }
-                        return <Button size="sm" variant="outline" disabled>Menunggu Hasil Seleksi</Button>;
-                      })()
-                    ) : item.status === "COMPLETED" ? (
-                      <StatusBadge status="COMPLETED" />
-                    ) : "-"}
-                  </TableCell>
-                )}
-              </TableRow>
-            ))}
-          </DataTable>
-        )}
-      </CardContent></Card>
+      {["SM", "VENDOR", "VM"].includes(session?.user.role || "") ? (
+        <>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Proses Berjalan</CardTitle>
+              <p className="text-sm text-muted-foreground">Request yang masih berjalan; menunggu seleksi kandidat ditampilkan lebih dahulu.</p>
+            </CardHeader>
+            <CardContent className="overflow-x-auto p-0">
+              <LoadingError loading={requests.loading} error={requests.error} empty={!pendingRequests.length} />
+              {!requests.loading && !requests.error && pendingRequests.length > 0 && renderRequestRows(pendingRequests)}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle className="text-lg">Riwayat Rekrutmen</CardTitle></CardHeader>
+            <CardContent className="overflow-x-auto p-0">
+              <LoadingError loading={requests.loading} error={requests.error} empty={!finishedRequests.length} />
+              {!requests.loading && !requests.error && finishedRequests.length > 0 && renderRequestRows(finishedRequests)}
+            </CardContent>
+          </Card>
+        </>
+      ) : (
+        <Card><CardContent className="overflow-x-auto p-0">
+          <LoadingError loading={requests.loading} error={requests.error} empty={!requests.data.length} />
+          {!requests.loading && !requests.error && requests.data.length > 0 && renderRequestRows(requests.data)}
+        </CardContent></Card>
+      )}
       {session?.user.role === "SM" && (
         <Dialog
           open={Boolean(activeReviewRequestId)}
@@ -1490,15 +1587,19 @@ export function OSRequestPage() {
         >
           <DialogHeader>
             <DialogTitle>
-              Seleksi Kandidat — {requests.data.find((item) => item.id === activeReviewRequestId)?.posisi || "Request OS"}
+              Seleksi Kandidat — {activeReviewRequest?.posisi || "Request OS"}
             </DialogTitle>
             <p className="text-sm text-muted-foreground">
-              Request {requests.data.find((item) => item.id === activeReviewRequestId)?.jumlah || 0} orang ·
-              {" "}{requests.data.find((item) => item.id === activeReviewRequestId)?.vendor?.name || "Vendor"}
+              Request {activeReviewRequest?.jumlah || 0} orang ·
+              {" "}{activeReviewRequest?.vendor?.name || "Vendor"}
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Kandidat diterima: {acceptedCandidateCount} / {activeReviewRequest?.jumlah || 0}
+              {!hasSelectionCapacity && " · Kuota penerimaan sudah terpenuhi."}
             </p>
           </DialogHeader>
           <DialogContent className="space-y-4">
-            {requests.data.find((item) => item.id === activeReviewRequestId)?.candidates?.map((candidate) => (
+            {activeReviewRequest?.candidates?.map((candidate) => (
               <div key={candidate.id} className="rounded-lg border p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="space-y-1">
@@ -1514,7 +1615,10 @@ export function OSRequestPage() {
                   <div className="flex items-center gap-2">
                     {candidate.status === "KANDIDAT" ? (
                       <>
-                        <Button disabled={candidateActionId === candidate.id} onClick={() => decideCandidate(candidate.id, "APPROVED")}>
+                        <Button
+                          disabled={candidateActionId === candidate.id || !hasSelectionCapacity}
+                          onClick={() => decideCandidate(candidate.id, "APPROVED")}
+                        >
                           Terima
                         </Button>
                         <Button variant="outline" disabled={candidateActionId === candidate.id} onClick={() => decideCandidate(candidate.id, "REJECTED")}>

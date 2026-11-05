@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
+import { Prisma } from "@prisma/client";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+
+class CandidateQuotaReachedError extends Error {}
 
 const maxImageBytes = 5 * 1024 * 1024;
 const maxCandidatesPerSubmission = 10;
@@ -210,9 +213,26 @@ export async function PATCH(req: NextRequest) {
           osRequest: { requesterId: session.user.id, status: { in: ["WAITING_SELECTION", "IN_PROGRESS"] } },
           status: "KANDIDAT",
         },
-        select: { id: true, osRequestId: true, accountRequestId: true },
+        select: {
+          id: true,
+          osRequestId: true,
+          accountRequestId: true,
+          osRequest: { select: { jumlah: true } },
+        },
       });
       if (!candidate) return null;
+
+      if (decision === "APPROVED") {
+        const acceptedCount = await tx.candidate.count({
+          where: {
+            osRequestId: candidate.osRequestId,
+            status: { in: ["TERPILIH", "ACTIVATED"] },
+          },
+        });
+        if (acceptedCount >= candidate.osRequest.jumlah) {
+          throw new CandidateQuotaReachedError();
+        }
+      }
 
       const updatedCandidate = await tx.candidate.updateMany({
         where: { id: candidate.id, status: "KANDIDAT" },
@@ -227,6 +247,38 @@ export async function PATCH(req: NextRequest) {
         });
       }
 
+      let autoRejectedCount = 0;
+      if (decision === "APPROVED") {
+        const acceptedCount = await tx.candidate.count({
+          where: {
+            osRequestId: candidate.osRequestId,
+            status: { in: ["TERPILIH", "ACTIVATED"] },
+          },
+        });
+        if (acceptedCount >= candidate.osRequest.jumlah) {
+          const remainingCandidates = await tx.candidate.findMany({
+            where: { osRequestId: candidate.osRequestId, status: "KANDIDAT" },
+            select: { id: true, accountRequestId: true },
+          });
+          autoRejectedCount = (await tx.candidate.updateMany({
+            where: {
+              osRequestId: candidate.osRequestId,
+              status: "KANDIDAT",
+            },
+            data: { status: "DITOLAK" },
+          })).count;
+          const accountRequestIds = remainingCandidates
+            .map((remainingCandidate) => remainingCandidate.accountRequestId)
+            .filter((id): id is string => id !== null);
+          if (accountRequestIds.length > 0) {
+            await tx.accountRequest.updateMany({
+              where: { id: { in: accountRequestIds } },
+              data: { status: "REJECTED" },
+            });
+          }
+        }
+      }
+
       const undecidedCount = await tx.candidate.count({
         where: { osRequestId: candidate.osRequestId, status: "KANDIDAT" },
       });
@@ -236,7 +288,7 @@ export async function PATCH(req: NextRequest) {
         });
         await tx.oSRequest.update({
           where: { id: candidate.osRequestId },
-          data: { status: selectedCount > 0 ? "WAITING_ACTIVATION" : "NOT_SELECTED" },
+          data: { status: selectedCount > 0 ? "WAITING_VENDOR_REQUEST" : "NOT_SELECTED" },
         });
       } else {
         await tx.oSRequest.updateMany({
@@ -245,8 +297,12 @@ export async function PATCH(req: NextRequest) {
         });
       }
 
-      return { id: candidate.id, status: decision === "APPROVED" ? "TERPILIH" : "DITOLAK" };
-    });
+      return {
+        id: candidate.id,
+        status: decision === "APPROVED" ? "TERPILIH" : "DITOLAK",
+        autoRejectedCount,
+      };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     if (!result) {
       return NextResponse.json({ error: "Kandidat tidak ditemukan atau sudah diproses." }, { status: 409 });
@@ -255,6 +311,12 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json(result);
   } catch (error) {
     console.error("Candidate PATCH error:", error);
+    if (error instanceof CandidateQuotaReachedError) {
+      return NextResponse.json({ error: "Kuota kandidat diterima sudah terpenuhi sesuai jumlah Request OS." }, { status: 409 });
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
+      return NextResponse.json({ error: "Seleksi kandidat sedang diproses bersamaan. Silakan coba kembali." }, { status: 409 });
+    }
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }

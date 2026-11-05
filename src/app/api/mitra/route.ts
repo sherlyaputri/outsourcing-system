@@ -74,8 +74,6 @@ export async function PUT(req: NextRequest) {
       noBpjs,
       noRekening,
       namaBank,
-      penempatan,
-      posisi,
       jenisSim,
       noSim,
       fotoKtp,
@@ -94,7 +92,7 @@ export async function PUT(req: NextRequest) {
     }
     const textFields = [
       phone, tempatLahir, alamat, kelurahan, kecamatan, kabKota, provinsi,
-      noBpjs, noRekening, namaBank, penempatan, posisi, jenisSim, noSim,
+      noBpjs, noRekening, namaBank, jenisSim, noSim,
     ];
     if (textFields.some((value) => value !== undefined && value !== null && typeof value !== "string")) {
       return NextResponse.json({ error: "Format data profil tidak valid." }, { status: 400 });
@@ -183,8 +181,6 @@ export async function PUT(req: NextRequest) {
           noBpjs: noBpjs?.trim() || null,
           noRekening: noRekening?.trim() || null,
           namaBank: namaBank?.trim() || null,
-          penempatan: penempatan?.trim() || null,
-          posisi: posisi?.trim() || null,
           jenisSim: jenisSim?.trim() || null,
           noSim: noSim?.trim() || null,
           ...uploadedImages,
