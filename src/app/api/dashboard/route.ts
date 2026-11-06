@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getMitraShift } from "@/lib/mitra-shift";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,19 @@ export async function GET() {
       const totalAbsensi = await prisma.attendance.count({
         where: { userId: session.user.id },
       });
-      const absensiHariIni = await prisma.attendance.findFirst({
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      yesterday.setHours(0, 0, 0, 0);
+      const absensiTerbuka = await prisma.attendance.findFirst({
+        where: {
+          userId: session.user.id,
+          date: { gte: yesterday },
+          checkIn: { not: null },
+          checkOut: null,
+        },
+        orderBy: { date: "desc" },
+      });
+      const absensiHariIni = absensiTerbuka || await prisma.attendance.findFirst({
         where: {
           userId: session.user.id,
           date: {
@@ -28,7 +41,8 @@ export async function GET() {
           },
         },
       });
-      stats = { totalAbsensi, sudahAbsenHariIni: !!absensiHariIni, absensiHariIni };
+      const waktuKerja = await getMitraShift(session.user.id, session.user.email);
+      stats = { totalAbsensi, sudahAbsenHariIni: !!absensiHariIni, absensiHariIni, waktuKerja };
     } else if (role === "VENDOR") {
       const totalMitra = await prisma.user.count({
         where: { vendorId, role: "MITRA", status: "ACTIVE" },
@@ -80,4 +94,3 @@ export async function GET() {
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
-

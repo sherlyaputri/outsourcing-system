@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
+import { Prisma } from "@prisma/client";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getShiftEndAt } from "@/lib/attendance-shift";
+import { getMitraShift } from "@/lib/mitra-shift";
 
 export async function GET(req: NextRequest) {
   try {
@@ -36,12 +39,67 @@ export async function GET(req: NextRequest) {
 
     const attendances = await prisma.attendance.findMany({
       where,
-      include: { user: { select: { name: true, email: true, vendorId: true } } },
+      include: {
+        user: {
+          select: {
+            name: true,
+            email: true,
+            vendorId: true,
+            mitraProfile: { select: { waktuKerja: true } },
+          },
+        },
+      },
       orderBy: { date: "desc" },
       take: 100,
     });
 
-    return NextResponse.json(attendances);
+    if (session.user.role === "MITRA" && month) {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      yesterday.setHours(0, 0, 0, 0);
+      const openAttendance = await prisma.attendance.findFirst({
+        where: {
+          userId: session.user.id,
+          date: { gte: yesterday },
+          checkIn: { not: null },
+          checkOut: null,
+        },
+        include: {
+          user: {
+            select: {
+              name: true,
+              email: true,
+              vendorId: true,
+              mitraProfile: { select: { waktuKerja: true } },
+            },
+          },
+        },
+        orderBy: { date: "desc" },
+      });
+      if (openAttendance && !attendances.some(({ id }) => id === openAttendance.id)) {
+        attendances.push(openAttendance);
+        attendances.sort((first, second) => second.date.getTime() - first.date.getTime());
+      }
+    }
+
+    const checkoutLocations = attendances.length
+      ? await prisma.$queryRaw<Array<{
+          id: string;
+          latitudeCheckOut: number | null;
+          longitudeCheckOut: number | null;
+        }>>(Prisma.sql`
+          SELECT id, latitudeCheckOut, longitudeCheckOut
+          FROM Attendance
+          WHERE id IN (${Prisma.join(attendances.map(({ id }) => id))})
+        `)
+      : [];
+    const checkoutLocationById = new Map(checkoutLocations.map((location) => [location.id, location]));
+
+    return NextResponse.json(attendances.map((attendance) => ({
+      ...attendance,
+      latitudeCheckOut: checkoutLocationById.get(attendance.id)?.latitudeCheckOut ?? null,
+      longitudeCheckOut: checkoutLocationById.get(attendance.id)?.longitudeCheckOut ?? null,
+    })));
   } catch (error) {
     console.error("Attendance GET error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
@@ -57,34 +115,88 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json();
     const { type, fotoCheckIn, latitude, longitude, note } = body;
+    if (
+      typeof latitude !== "number" ||
+      typeof longitude !== "number" ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      return NextResponse.json({ error: "Lokasi GPS tidak valid. Silakan ambil foto absensi kembali." }, { status: 400 });
+    }
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    // Check if already checked in today
-    const existing = await prisma.attendance.findFirst({
+    if (body.isCheckOut === true) {
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      const existing = await prisma.attendance.findFirst({
+        where: {
+          userId: session.user.id,
+          date: { gte: yesterday, lt: tomorrow },
+          checkIn: { not: null },
+          checkOut: null,
+        },
+        orderBy: { date: "desc" },
+      });
+      if (!existing?.checkIn) {
+        return NextResponse.json({ error: "Tidak ada absensi check-in yang perlu diakhiri." }, { status: 400 });
+      }
+
+      const shift = await getMitraShift(session.user.id, session.user.email);
+      const scheduledEnd = getShiftEndAt(existing.checkIn, shift);
+      if (!scheduledEnd) {
+        return NextResponse.json({ error: "Jadwal shift belum tersedia. Hubungi vendor atau administrator." }, { status: 409 });
+      }
+      const checkedOutAt = new Date();
+      if (checkedOutAt < scheduledEnd) {
+        return NextResponse.json({
+          error: `Anda belum dapat check-out. Jadwal shift berakhir pukul ${new Intl.DateTimeFormat("id-ID", {
+            timeZone: "Asia/Jakarta",
+            hour: "2-digit",
+            minute: "2-digit",
+          }).format(scheduledEnd)} WIB.`,
+        }, { status: 400 });
+      }
+
+      const updated = await prisma.$transaction(async (tx) => {
+        const attendance = await tx.attendance.update({
+          where: { id: existing.id },
+          data: {
+            checkOut: checkedOutAt,
+            fotoCheckOut: body.fotoCheckOut,
+          },
+        });
+        await tx.$executeRaw(Prisma.sql`
+          UPDATE Attendance
+          SET latitudeCheckOut = ${latitude}, longitudeCheckOut = ${longitude}
+          WHERE id = ${existing.id}
+        `);
+        return attendance;
+      });
+      return NextResponse.json({ ...updated, latitudeCheckOut: latitude, longitudeCheckOut: longitude });
+    }
+
+    const existingToday = await prisma.attendance.findFirst({
       where: {
         userId: session.user.id,
         date: { gte: today, lt: tomorrow },
       },
     });
-
-    if (existing && existing.checkIn && !body.isCheckOut) {
-      return NextResponse.json({ error: "Anda sudah check-in hari ini" }, { status: 400 });
-    }
-
-    if (body.isCheckOut && existing) {
-      // Update for check-out
-      const updated = await prisma.attendance.update({
-        where: { id: existing.id },
-        data: {
-          checkOut: new Date(),
-          fotoCheckOut: body.fotoCheckOut,
-        },
-      });
-      return NextResponse.json(updated);
+    const openAttendance = await prisma.attendance.findFirst({
+      where: {
+        userId: session.user.id,
+        date: { gte: new Date(Date.now() - 36 * 60 * 60 * 1000) },
+        checkIn: { not: null },
+        checkOut: null,
+      },
+    });
+    if (existingToday?.checkIn || openAttendance) {
+      return NextResponse.json({ error: "Anda sudah check-in dan belum melakukan check-out." }, { status: 400 });
     }
 
     // Create new check-in

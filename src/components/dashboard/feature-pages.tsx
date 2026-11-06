@@ -31,10 +31,12 @@ interface Mitra {
   name: string;
   email: string;
   status: string;
+  initialPassword?: string | null;
   phone?: string | null;
   vendor?: { name: string } | null;
   mitraProfile?: {
     idMitraOs?: string | null;
+    waktuKerja?: string | null;
     posisi?: string | null;
     penempatan?: string | null;
     alamat?: string | null;
@@ -46,6 +48,7 @@ interface Mitra {
     jenisSim?: string | null;
     noSim?: string | null;
     fotoSim?: string | null;
+    skck?: string | null;
     namaBank?: string | null;
     noRekening?: string | null;
     nik?: string | null;
@@ -67,12 +70,14 @@ interface OSCandidate {
   jenisSim?: string | null;
   noSim?: string | null;
   fotoSim?: string | null;
+  skck?: string | null;
   alamat?: string | null;
   kelurahan?: string | null;
   kecamatan?: string | null;
   kabKota?: string | null;
   provinsi?: string | null;
   status: string;
+  alasanKeputusan?: string | null;
   accountRequest?: { status: string } | null;
 }
 
@@ -92,6 +97,7 @@ interface AccountRequest {
     jenisSim?: string | null;
     noSim?: string | null;
     fotoSim?: string | null;
+    skck?: string | null;
     alamat?: string | null;
     kelurahan?: string | null;
     kecamatan?: string | null;
@@ -108,6 +114,7 @@ interface CandidateDraft {
   jenisSim: string;
   noSim: string;
   fotoSim: File | null;
+  skck: File | null;
   phone: string;
   email: string;
   alamat: string;
@@ -122,6 +129,8 @@ interface VendorEmployee {
   status: string;
   name: string;
   nik: string;
+  jenisSim: string;
+  noSim: string;
   email: string;
   phone: string;
   alamat: string;
@@ -129,6 +138,7 @@ interface VendorEmployee {
   kecamatan: string;
   kabKota: string;
   provinsi: string;
+  hasSkck: boolean;
 }
 
 interface CandidateSubmissionDraft extends CandidateDraft {
@@ -252,6 +262,7 @@ async function sendJson(url: string, method: string, body: unknown) {
   if (!response.ok) {
     throw new Error(result.error || `Permintaan gagal (${response.status})`);
   }
+  window.dispatchEvent(new Event("dashboard:notifications-refresh"));
   return result;
 }
 
@@ -337,7 +348,11 @@ export function MitraManagementPage() {
       <Card><CardContent className="p-0">
         <LoadingError loading={mitras.loading} error={mitras.error} empty={!mitras.data.length} />
         {!mitras.loading && !mitras.error && mitras.data.length > 0 && (
-          <DataTable headers={["ID Mitra OS", "Nama", "Email", "Vendor", "Posisi", "Penempatan", "Detail Data", "Status"]}>
+          <DataTable headers={[
+            "ID Mitra OS", "Nama", "Email", "Vendor", "Posisi", "Penempatan", "Shift",
+            ...(session?.user.role === "VENDOR" || session?.user.role === "VM" ? ["Kredensial Awal"] : []),
+            "Detail Data", "Status",
+          ]}>
             {mitras.data.map((mitra) => (
               <TableRow key={mitra.id}>
                 <TableCell>
@@ -347,6 +362,20 @@ export function MitraManagementPage() {
                 <TableCell>{mitra.vendor?.name || "-"}</TableCell>
                 <TableCell>{mitra.mitraProfile?.posisi || "-"}</TableCell>
                 <TableCell>{mitra.mitraProfile?.penempatan || "-"}</TableCell>
+                <TableCell>{mitra.mitraProfile?.waktuKerja || "Belum diatur"}</TableCell>
+                {(session?.user.role === "VENDOR" || session?.user.role === "VM") && (
+                  <TableCell>
+                    {mitra.initialPassword ? (
+                      <details>
+                        <summary className="cursor-pointer text-primary">Lihat kredensial</summary>
+                        <div className="mt-1 space-y-1 text-xs">
+                          <p>Username: {mitra.email}</p>
+                          <p>Password awal: <code>{mitra.initialPassword}</code></p>
+                        </div>
+                      </details>
+                    ) : "Tidak tersedia"}
+                  </TableCell>
+                )}
                 <TableCell>
                   {session?.user.role === "VENDOR" && mitra.mitraProfile && (
                     <details>
@@ -509,6 +538,7 @@ function MitraEditDialog({
         name: form.get("name"),
         email: form.get("email"),
         phone: form.get("phone"),
+        waktuKerja: form.get("waktuKerja"),
         tempatLahir: form.get("tempatLahir"),
         tanggalLahir: form.get("tanggalLahir"),
         alamat: form.get("alamat"),
@@ -572,6 +602,12 @@ function MitraEditDialog({
             </label>
             <label className="space-y-1 text-sm">Penempatan (tidak dapat diubah)
               <input className={`${fieldClass} cursor-not-allowed bg-muted`} value={mitra.mitraProfile?.penempatan || "-"} readOnly />
+            </label>
+            <label className="space-y-1 text-sm">Jadwal shift<RequiredMark />
+              <select className={fieldClass} name="waktuKerja" defaultValue={mitra.mitraProfile?.waktuKerja || "08:00-17:00"} required>
+                <option value="08:00-17:00">08.00–17.00</option>
+                <option value="20:00-05:00">20.00–05.00</option>
+              </select>
             </label>
             <label className="space-y-1 text-sm">Jenis SIM<OptionalMark />
               <select className={fieldClass} name="jenisSim" defaultValue={mitra.mitraProfile?.jenisSim || ""}>
@@ -718,6 +754,7 @@ function emptyCandidate(): CandidateDraft {
     jenisSim: "",
     noSim: "",
     fotoSim: null,
+    skck: null,
     phone: "",
     email: "",
     alamat: "",
@@ -942,6 +979,9 @@ function CandidateFields({
       <label className="space-y-1 text-sm">Foto SIM (JPG/PNG, maks. 5 MB)<RequiredMark />
         <input className={fieldClass} type="file" accept="image/jpeg,image/png" onChange={(event) => update(index, "fotoSim", event.target.files?.[0] || null)} required />
       </label>
+      <label className="space-y-1 text-sm">SKCK (PDF/JPG/PNG, maks. 5 MB)<RequiredMark />
+        <input className={fieldClass} type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={(event) => update(index, "skck", event.target.files?.[0] || null)} required />
+      </label>
       <label className="space-y-1 text-sm">No. HP (hanya angka: 08xxxxxxxxxxxx)<RequiredMark />
         <input className={fieldClass} type="text" inputMode="numeric" pattern="08[0-9]{8,12}" maxLength={14} placeholder="08xxxxxxxxxxxx" value={candidate.phone} onChange={(event) => update(index, "phone", event.target.value.replace(/\D/g, "").slice(0, 14))} required />
       </label>
@@ -968,6 +1008,7 @@ export function VendorEmployeesPage() {
   const employees = useApiData<VendorEmployee[]>("/api/vendor-employee", []);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [draft, setDraft] = useState<CandidateDraft>(emptyCandidate());
+  const [editingEmployee, setEditingEmployee] = useState<VendorEmployee | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -978,12 +1019,16 @@ export function VendorEmployeesPage() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-    if (!draft.fotoKtp || !draft.fotoSim) {
-      setError("Foto KTP dan SIM wajib diunggah untuk data karyawan.");
+    if (!draft.fotoKtp || !draft.fotoSim || !draft.skck) {
+      setError("Foto KTP, foto SIM, dan SKCK wajib diunggah untuk data karyawan.");
       return;
     }
-    if (draft.fotoKtp.size > 5 * 1024 * 1024 || draft.fotoSim.size > 5 * 1024 * 1024) {
-      setError("Ukuran setiap foto maksimal 5 MB.");
+    if ([draft.fotoKtp, draft.fotoSim, draft.skck].some((file) => file.size > 5 * 1024 * 1024)) {
+      setError("Ukuran setiap foto/dokumen maksimal 5 MB.");
+      return;
+    }
+    if (!["application/pdf", "image/jpeg", "image/png"].includes(draft.skck.type)) {
+      setError("SKCK harus berupa PDF, JPG, atau PNG.");
       return;
     }
 
@@ -993,12 +1038,51 @@ export function VendorEmployeesPage() {
         ...draft,
         fotoKtp: await readImage(draft.fotoKtp),
         fotoSim: await readImage(draft.fotoSim),
+        skck: await readImage(draft.skck),
       });
       setDraft(emptyCandidate());
       setDialogOpen(false);
       employees.reload();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Gagal menyimpan data karyawan.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function editEmployee(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingEmployee) return;
+    setError(null);
+    setSaving(true);
+    const form = new FormData(event.currentTarget);
+    try {
+      const skck = form.get("skck");
+      if (skck instanceof File && skck.size > 5 * 1024 * 1024) {
+        throw new Error("Ukuran SKCK maksimal 5 MB.");
+      }
+      if (skck instanceof File && skck.size > 0 && !["application/pdf", "image/jpeg", "image/png"].includes(skck.type)) {
+        throw new Error("SKCK harus berupa PDF, JPG, atau PNG.");
+      }
+      await sendJson("/api/vendor-employee", "PATCH", {
+        employeeId: editingEmployee.id,
+        name: form.get("name"),
+        nik: form.get("nik"),
+        jenisSim: form.get("jenisSim"),
+        noSim: form.get("noSim"),
+        phone: form.get("phone"),
+        email: form.get("email"),
+        alamat: form.get("alamat"),
+        kelurahan: form.get("kelurahan"),
+        kecamatan: form.get("kecamatan"),
+        kabKota: form.get("kabKota"),
+        provinsi: form.get("provinsi"),
+        ...(skck instanceof File && skck.size > 0 ? { skck: await readImage(skck) } : {}),
+      });
+      setEditingEmployee(null);
+      employees.reload();
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Gagal menyimpan data karyawan.");
     } finally {
       setSaving(false);
     }
@@ -1013,10 +1097,11 @@ export function VendorEmployeesPage() {
       <div className="flex justify-end">
         <Button onClick={() => { setError(null); setDialogOpen(true); }}>Tambah Karyawan</Button>
       </div>
+      <FormError error={error} />
       <Card><CardContent className="overflow-x-auto p-0">
         <LoadingError loading={employees.loading} error={employees.error} empty={!employees.data.length} />
         {!employees.loading && !employees.error && employees.data.length > 0 && (
-          <DataTable headers={["Nama", "NIK", "Email", "No. HP", "Alamat", "Status"]}>
+          <DataTable headers={["Nama", "NIK", "Email", "No. HP", "Alamat", "Edit Data Karyawan", "Status"]}>
             {employees.data.map((employee) => (
               <TableRow key={employee.id}>
                 <TableCell>{employee.name}</TableCell>
@@ -1024,6 +1109,11 @@ export function VendorEmployeesPage() {
                 <TableCell>{employee.email}</TableCell>
                 <TableCell>{employee.phone}</TableCell>
                 <TableCell>{[employee.provinsi, employee.kabKota, employee.kecamatan, employee.kelurahan, employee.alamat].filter(Boolean).join(", ")}</TableCell>
+                <TableCell>
+                  <Button size="sm" variant="outline" onClick={() => { setError(null); setEditingEmployee(employee); }}>
+                    Edit data karyawan
+                  </Button>
+                </TableCell>
                 <TableCell><StatusBadge status={employee.status} /></TableCell>
               </TableRow>
             ))}
@@ -1043,6 +1133,48 @@ export function VendorEmployeesPage() {
               <div className="flex justify-end gap-2">
                 <Button type="button" variant="outline" disabled={saving} onClick={() => setDialogOpen(false)}>Batal</Button>
                 <Button type="submit" disabled={saving}>{saving ? "Menyimpan..." : "Simpan Karyawan"}</Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
+      {editingEmployee && (
+        <Dialog open onOpenChange={(open) => { if (!open && !saving) setEditingEmployee(null); }}>
+          <DialogHeader><DialogTitle>Edit Data Karyawan — {editingEmployee.name}</DialogTitle></DialogHeader>
+          <DialogContent>
+            <form onSubmit={editEmployee} className="grid gap-4 md:grid-cols-2">
+              <label className="space-y-1 text-sm">Nama karyawan<RequiredMark /><input className={fieldClass} name="name" defaultValue={editingEmployee.name} required /></label>
+              <label className="space-y-1 text-sm">NIK KTP (16 digit)<RequiredMark /><input className={fieldClass} name="nik" inputMode="numeric" pattern="[0-9]{16}" maxLength={16} defaultValue={editingEmployee.nik} required /></label>
+              <label className="space-y-1 text-sm">Email<RequiredMark /><input className={fieldClass} name="email" type="email" defaultValue={editingEmployee.email} required /></label>
+              <label className="space-y-1 text-sm">No. HP<RequiredMark /><input className={fieldClass} name="phone" inputMode="numeric" pattern="08[0-9]{8,12}" defaultValue={editingEmployee.phone} required /></label>
+              <label className="space-y-1 text-sm">Jenis SIM<RequiredMark />
+                <select className={fieldClass} name="jenisSim" defaultValue={editingEmployee.jenisSim} required>
+                  {["A", "B1", "B2", "C", "D"].map((kind) => <option key={kind} value={kind}>SIM {kind}</option>)}
+                </select>
+              </label>
+              <label className="space-y-1 text-sm">Nomor SIM<RequiredMark /><input className={fieldClass} name="noSim" inputMode="numeric" defaultValue={editingEmployee.noSim} required /></label>
+              <label className="space-y-1 text-sm">Provinsi<RequiredMark /><input className={fieldClass} name="provinsi" defaultValue={editingEmployee.provinsi} required /></label>
+              <label className="space-y-1 text-sm">Kabupaten/Kota<RequiredMark /><input className={fieldClass} name="kabKota" defaultValue={editingEmployee.kabKota} required /></label>
+              <label className="space-y-1 text-sm">Kecamatan<RequiredMark /><input className={fieldClass} name="kecamatan" defaultValue={editingEmployee.kecamatan} required /></label>
+              <label className="space-y-1 text-sm">Kelurahan/Desa<RequiredMark /><input className={fieldClass} name="kelurahan" defaultValue={editingEmployee.kelurahan} required /></label>
+              <label className="space-y-1 text-sm md:col-span-2">Alamat<RequiredMark /><textarea className={fieldClass} name="alamat" rows={2} defaultValue={editingEmployee.alamat} required /></label>
+              <label className="space-y-1 text-sm md:col-span-2">
+                SKCK (PDF/JPG/PNG, maks. 5 MB){!editingEmployee.hasSkck && <RequiredMark />}
+                <input
+                  className={fieldClass}
+                  type="file"
+                  name="skck"
+                  accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                  required={!editingEmployee.hasSkck}
+                />
+                <span className="block text-xs text-muted-foreground">
+                  {editingEmployee.hasSkck ? "SKCK sudah tersimpan. Pilih file hanya jika ingin mengganti." : "SKCK belum diunggah, silakan pilih file."}
+                </span>
+              </label>
+              <FormError error={error} />
+              <div className="flex justify-end gap-2 md:col-span-2">
+                <Button type="button" variant="outline" disabled={saving} onClick={() => setEditingEmployee(null)}>Batal</Button>
+                <Button type="submit" disabled={saving}>{saving ? "Menyimpan..." : "Simpan Perubahan"}</Button>
               </div>
             </form>
           </DialogContent>
@@ -1114,15 +1246,25 @@ function VendorCandidateForm({
       setError("Pilih data karyawan untuk setiap kandidat yang menggunakan roster.");
       return;
     }
+    const selectedEmployeeIds = candidates
+      .filter((candidate) => candidate.source === "EMPLOYEE")
+      .map((candidate) => candidate.employeeId);
+    if (new Set(selectedEmployeeIds).size !== selectedEmployeeIds.length) {
+      setError("Data karyawan yang sama tidak dapat dipilih untuk lebih dari satu kandidat.");
+      return;
+    }
     if (!window.confirm(`Anda akan submit ${candidates.length} kandidat. Lanjutkan?`)) return;
     setSaving(true);
     try {
       for (const candidate of candidates.filter((item) => item.source === "NEW")) {
-        if (!candidate.fotoKtp || !candidate.fotoSim) {
-          throw new Error("Foto KTP dan SIM wajib diunggah untuk setiap kandidat.");
+        if (!candidate.fotoKtp || !candidate.fotoSim || !candidate.skck) {
+          throw new Error("Foto KTP, foto SIM, dan SKCK wajib diunggah untuk setiap kandidat.");
         }
-        if (candidate.fotoKtp.size > 5 * 1024 * 1024 || candidate.fotoSim.size > 5 * 1024 * 1024) {
-          throw new Error("Ukuran setiap foto maksimal 5 MB.");
+        if ([candidate.fotoKtp, candidate.fotoSim, candidate.skck].some((file) => file.size > 5 * 1024 * 1024)) {
+          throw new Error("Ukuran setiap foto/dokumen maksimal 5 MB.");
+        }
+        if (!["application/pdf", "image/jpeg", "image/png"].includes(candidate.skck.type)) {
+          throw new Error("SKCK harus berupa PDF, JPG, atau PNG.");
         }
       }
 
@@ -1135,6 +1277,7 @@ function VendorCandidateForm({
           jenisSim: candidate.jenisSim,
           noSim: candidate.noSim,
           fotoSim: await readImage(candidate.fotoSim!),
+          skck: await readImage(candidate.skck!),
           phone: candidate.phone,
           email: candidate.email,
           alamat: candidate.alamat,
@@ -1215,7 +1358,15 @@ function VendorCandidateForm({
                           {employees.loading ? "Memuat data karyawan..." : "Pilih karyawan"}
                         </option>
                         {employees.data.map((employee) => (
-                          <option key={employee.id} value={employee.id}>
+                          <option
+                            key={employee.id}
+                            value={employee.id}
+                            disabled={candidates.some((item, itemIndex) => (
+                              itemIndex !== index
+                              && item.source === "EMPLOYEE"
+                              && item.employeeId === employee.id
+                            ))}
+                          >
                             {employee.name} — {employee.nik}
                           </option>
                         ))}
@@ -1320,6 +1471,7 @@ export function AccountApprovalPage() {
                         <div className="flex gap-3">
                           {item.candidate.fotoKtp && <img className="h-24 rounded border object-contain" src={item.candidate.fotoKtp} alt="Foto KTP kandidat" />}
                           {item.candidate.fotoSim && <img className="h-24 rounded border object-contain" src={item.candidate.fotoSim} alt="Foto SIM kandidat" />}
+                          {item.candidate.skck && <a className="self-center text-primary underline" href={item.candidate.skck} target="_blank" rel="noreferrer">Lihat SKCK</a>}
                         </div>
                       </div>
                     </details>
@@ -1526,6 +1678,11 @@ export function OSRequestPage() {
   const [activeCandidateRequestId, setActiveCandidateRequestId] = useState<string | null>(null);
   const [activeReviewRequestId, setActiveReviewRequestId] = useState<string | null>(null);
   const [candidateActionId, setCandidateActionId] = useState<string | null>(null);
+  const [candidateDecision, setCandidateDecision] = useState<{
+    candidateId: string;
+    decision: "APPROVED" | "REJECTED";
+  } | null>(null);
+  const [candidateDecisionReason, setCandidateDecisionReason] = useState("");
 
   const needsMitraId = requestType === "PERGANTIAN" || requestType === "PENGURANGAN";
 
@@ -1551,17 +1708,32 @@ export function OSRequestPage() {
     }
   }
 
-  async function decideCandidate(candidateId: string, decision: "APPROVED" | "REJECTED") {
+  async function decideCandidate() {
+    if (!candidateDecision || !candidateDecisionReason.trim()) {
+      setError("Alasan diterima atau ditolak wajib diisi.");
+      return;
+    }
     setError(null);
-    setCandidateActionId(candidateId);
+    setCandidateActionId(candidateDecision.candidateId);
     try {
-      await sendJson("/api/candidate", "PATCH", { candidateId, decision });
+      await sendJson("/api/candidate", "PATCH", {
+        ...candidateDecision,
+        alasanKeputusan: candidateDecisionReason.trim(),
+      });
       requests.reload();
+      setCandidateDecision(null);
+      setCandidateDecisionReason("");
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Gagal memproses kandidat.");
     } finally {
       setCandidateActionId(null);
     }
+  }
+
+  function startCandidateDecision(candidateId: string, decision: "APPROVED" | "REJECTED") {
+    setError(null);
+    setCandidateDecision({ candidateId, decision });
+    setCandidateDecisionReason("");
   }
 
   async function requestCandidateAccounts(requestId: string) {
@@ -1854,6 +2026,9 @@ export function OSRequestPage() {
                     <p className="text-sm text-muted-foreground">{candidate.email || "-"} · {candidate.phone || "-"}</p>
                     <p className="text-sm">NIK: {candidate.nik || "-"}</p>
                     <p className="text-sm">SIM: {candidate.jenisSim || "-"} · {candidate.noSim || "-"}</p>
+                    {candidate.alasanKeputusan && (
+                      <p className="text-sm">Alasan keputusan: {candidate.alasanKeputusan}</p>
+                    )}
                     <p className="text-sm">
                       Alamat: {[candidate.provinsi, candidate.kabKota, candidate.kecamatan, candidate.kelurahan, candidate.alamat]
                         .filter(Boolean).join(", ") || "-"}
@@ -1864,11 +2039,11 @@ export function OSRequestPage() {
                       <>
                         <Button
                           disabled={candidateActionId === candidate.id || !hasSelectionCapacity}
-                          onClick={() => decideCandidate(candidate.id, "APPROVED")}
+                          onClick={() => startCandidateDecision(candidate.id, "APPROVED")}
                         >
                           Terima
                         </Button>
-                        <Button variant="outline" disabled={candidateActionId === candidate.id} onClick={() => decideCandidate(candidate.id, "REJECTED")}>
+                        <Button variant="outline" disabled={candidateActionId === candidate.id} onClick={() => startCandidateDecision(candidate.id, "REJECTED")}>
                           Tolak
                         </Button>
                       </>
@@ -1878,7 +2053,35 @@ export function OSRequestPage() {
                 <div className="mt-3 flex gap-3">
                   {candidate.fotoKtp && <a href={candidate.fotoKtp} target="_blank" rel="noreferrer"><img className="h-24 rounded border object-contain" src={candidate.fotoKtp} alt={`Foto KTP ${candidate.name}`} /></a>}
                   {candidate.fotoSim && <a href={candidate.fotoSim} target="_blank" rel="noreferrer"><img className="h-24 rounded border object-contain" src={candidate.fotoSim} alt={`Foto SIM ${candidate.name}`} /></a>}
+                  {candidate.skck && <a className="self-center text-sm text-primary underline" href={candidate.skck} target="_blank" rel="noreferrer">Lihat SKCK</a>}
                 </div>
+                {candidateDecision?.candidateId === candidate.id && (
+                  <div className="mt-4 space-y-3 rounded-md bg-muted p-3">
+                    <label className="block space-y-1 text-sm">
+                      Alasan {candidateDecision.decision === "APPROVED" ? "diterima" : "ditolak"}<RequiredMark />
+                      <textarea
+                        className={fieldClass}
+                        rows={3}
+                        value={candidateDecisionReason}
+                        onChange={(event) => setCandidateDecisionReason(event.target.value)}
+                        maxLength={2000}
+                        required
+                      />
+                    </label>
+                    <div className="flex justify-end gap-2">
+                      <Button type="button" variant="outline" onClick={() => setCandidateDecision(null)}>
+                        Batal
+                      </Button>
+                      <Button
+                        type="button"
+                        disabled={candidateActionId === candidate.id || !candidateDecisionReason.trim()}
+                        onClick={decideCandidate}
+                      >
+                        {candidateActionId === candidate.id ? "Menyimpan..." : "Simpan keputusan"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </DialogContent>

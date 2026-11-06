@@ -104,7 +104,33 @@ function getRoleLabel(role: string): string {
 export default function Sidebar({ role, userName, vendorName }: SidebarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = React.useState(false);
+  const [notificationCounts, setNotificationCounts] = React.useState<Record<string, number>>({});
   const navItems = getNavItems(role);
+
+  React.useEffect(() => {
+    let active = true;
+    const loadNotifications = async () => {
+      try {
+        const response = await fetch("/api/notifications");
+        if (!response.ok) throw new Error(`Notification API returned ${response.status}`);
+        const counts = await response.json() as Record<string, number>;
+        if (active) setNotificationCounts(counts);
+      } catch (error) {
+        console.error("Sidebar notifications error:", error);
+      }
+    };
+
+    loadNotifications();
+    const interval = window.setInterval(loadNotifications, 30_000);
+    window.addEventListener("focus", loadNotifications);
+    window.addEventListener("dashboard:notifications-refresh", loadNotifications);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", loadNotifications);
+      window.removeEventListener("dashboard:notifications-refresh", loadNotifications);
+    };
+  }, [role, pathname]);
 
   return (
     <>
@@ -158,7 +184,15 @@ export default function Sidebar({ role, userName, vendorName }: SidebarProps) {
               )}
             >
               {item.icon}
-              {item.label}
+              <span className="flex-1">{item.label}</span>
+              {(notificationCounts[item.href] || 0) > 0 && (
+                <span
+                  aria-label={`${notificationCounts[item.href]} aksi menunggu`}
+                  className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-[11px] font-bold leading-none text-white"
+                >
+                  {notificationCounts[item.href]}
+                </span>
+              )}
             </Link>
           ))}
         </nav>

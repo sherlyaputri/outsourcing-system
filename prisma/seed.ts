@@ -122,6 +122,7 @@ async function main() {
     data: {
       userId: mitra1.id,
       vendorId: vendor1.id,
+      waktuKerja: '08:00-17:00',
       nik: '3201012345678901',
       tempatLahir: 'Jakarta',
       tanggalLahir: new Date('1995-05-15'),
@@ -137,6 +138,7 @@ async function main() {
     data: {
       userId: mitra2.id,
       vendorId: vendor1.id,
+      waktuKerja: '08:00-17:00',
       nik: '3201019876543210',
       tempatLahir: 'Bogor',
       tanggalLahir: new Date('1998-08-20'),

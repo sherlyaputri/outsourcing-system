@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { randomInt } from "node:crypto";
+import { encryptInitialPassword, generateInitialPassword } from "@/lib/initial-password";
 
 class CandidateQuotaReachedError extends Error {}
 
@@ -49,6 +50,7 @@ export async function GET(req: NextRequest) {
           jenisSim: true,
           noSim: true,
           fotoSim: true,
+          skck: true,
           alamat: true,
           kelurahan: true,
           kecamatan: true,
@@ -58,7 +60,13 @@ export async function GET(req: NextRequest) {
         }
       : { id: true, osRequest: { select: { id: true, type: true, jumlah: true } } };
     if (session.user.role === "VENDOR") {
-      where = { requesterId: session.user.id };
+      where = {
+        requesterId: session.user.id,
+        OR: [
+          { status: { in: ["WAITING_SELECTION", "PENDING", "REJECTED"] } },
+          { status: "ACTIVATED" },
+        ],
+      };
     }
 
     const requests = await prisma.accountRequest.findMany({
@@ -167,7 +175,9 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (status === "APPROVED") {
-      const hashedPassword = await bcrypt.hash("mitra123", 10);
+      const initialPassword = generateInitialPassword();
+      const hashedPassword = await bcrypt.hash(initialPassword, 10);
+      const encryptedInitialPassword = encryptInitialPassword(initialPassword);
       const userWithEmail = await prisma.user.findUnique({ where: { email: accountReq.email } });
       if (userWithEmail) {
         return NextResponse.json({ error: "Email sudah digunakan oleh akun lain" }, { status: 409 });
@@ -190,6 +200,7 @@ export async function PATCH(req: NextRequest) {
           data: {
             email: accountReq.email,
             password: hashedPassword,
+            initialPasswordEncrypted: encryptedInitialPassword,
             name: accountReq.name,
             role: "MITRA",
             status: "ACTIVE",
@@ -208,10 +219,12 @@ export async function PATCH(req: NextRequest) {
               vendorId: accountReq.vendorId,
               idMitraOs: await generateMitraOsId(tx),
               nik: accountReq.candidate.nik,
+              waktuKerja: accountReq.candidate.osRequest.waktuKerja,
               fotoKtp: accountReq.candidate.fotoKtp,
               jenisSim: accountReq.candidate.jenisSim,
               noSim: accountReq.candidate.noSim,
               fotoSim: accountReq.candidate.fotoSim,
+              skck: accountReq.candidate.skck,
               alamat: accountReq.candidate.alamat,
               kelurahan: accountReq.candidate.kelurahan,
               kecamatan: accountReq.candidate.kecamatan,

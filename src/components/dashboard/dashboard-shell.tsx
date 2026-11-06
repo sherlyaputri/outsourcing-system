@@ -8,7 +8,8 @@ import { Card, CardContent } from "@/components/ui/card";
 export interface DashboardStats {
   totalAbsensi?: number;
   sudahAbsenHariIni?: boolean;
-  absensiHariIni?: { checkIn?: string | null } | null;
+  absensiHariIni?: { checkIn?: string | null; checkOut?: string | null } | null;
+  waktuKerja?: string | null;
   totalMitra?: number;
   totalKlaim?: number;
   totalInvoice?: number;

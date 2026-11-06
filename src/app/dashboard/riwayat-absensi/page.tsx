@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { History } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { getShiftStartAt } from "@/lib/attendance-shift";
 
 interface AttendanceRecord {
   id: string;
@@ -21,7 +22,27 @@ interface AttendanceRecord {
   note?: string | null;
   fotoCheckIn?: string | null;
   fotoCheckOut?: string | null;
-  user?: { name: string };
+  latitude?: number | null;
+  longitude?: number | null;
+  latitudeCheckOut?: number | null;
+  longitudeCheckOut?: number | null;
+  user?: { name: string; mitraProfile?: { waktuKerja?: string | null } | null };
+}
+
+function LocationLink({ latitude, longitude, label }: {
+  latitude?: number | null;
+  longitude?: number | null;
+  label: string;
+}) {
+  if (latitude == null || longitude == null) {
+    return <span className="text-muted-foreground">{label}: belum tersedia</span>;
+  }
+  const mapUrl = `https://www.google.com/maps?q=${latitude},${longitude}`;
+  return (
+    <a className="text-primary underline" href={mapUrl} target="_blank" rel="noreferrer">
+      {label}: {latitude.toFixed(6)}, {longitude.toFixed(6)}
+    </a>
+  );
 }
 
 export default function RiwayatAbsensiPage() {
@@ -86,6 +107,7 @@ export default function RiwayatAbsensiPage() {
                     <TableHead>Tanggal</TableHead>
                     <TableHead>Check-In</TableHead>
                     <TableHead>Check-Out</TableHead>
+                    <TableHead>Lokasi GPS</TableHead>
                     <TableHead>Foto</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Catatan</TableHead>
@@ -93,7 +115,14 @@ export default function RiwayatAbsensiPage() {
                 </TableHeader>
                 <TableBody>
                   {attendances.map((att) => (
-                    <TableRow key={att.id}>
+                    (() => {
+                      const shift = att.user?.mitraProfile?.waktuKerja;
+                      const scheduledStart = att.checkIn
+                        ? getShiftStartAt(new Date(att.checkIn), shift)
+                        : null;
+                      const isLate = att.type === "HADIR" &&
+                        Boolean(scheduledStart && new Date(att.checkIn!) > scheduledStart);
+                      return <TableRow key={att.id}>
                       {session?.user.role !== "MITRA" && (
                         <TableCell className="font-medium">{att.user?.name || "-"}</TableCell>
                       )}
@@ -103,14 +132,33 @@ export default function RiwayatAbsensiPage() {
                         })}
                       </TableCell>
                       <TableCell>
-                        {att.checkIn
-                          ? new Date(att.checkIn).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
-                          : "-"}
+                        {att.checkIn ? (
+                          <div className="flex flex-col items-start gap-1">
+                            <span>{new Date(att.checkIn).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}</span>
+                            {scheduledStart && (
+                              <span className={`text-xs font-medium ${isLate ? "text-red-600" : "text-green-600"}`}>
+                                {isLate ? "Telat" : "Tepat waktu"}
+                              </span>
+                            )}
+                          </div>
+                        ) : "-"}
                       </TableCell>
                       <TableCell>
                         {att.checkOut
                           ? new Date(att.checkOut).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })
                           : "-"}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex min-w-48 flex-col gap-1 text-xs">
+                          <LocationLink latitude={att.latitude} longitude={att.longitude} label="Check-in" />
+                          {att.checkOut && (
+                            <LocationLink
+                              latitude={att.latitudeCheckOut}
+                              longitude={att.longitudeCheckOut}
+                              label="Check-out"
+                            />
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-2">
@@ -127,9 +175,18 @@ export default function RiwayatAbsensiPage() {
                           {!att.fotoCheckIn && !att.fotoCheckOut && "-"}
                         </div>
                       </TableCell>
-                      <TableCell><StatusBadge status={att.type} /></TableCell>
+                      <TableCell>
+                        {isLate ? (
+                          <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800">
+                            Hadir (telat)
+                          </span>
+                        ) : (
+                          <StatusBadge status={att.type} />
+                        )}
+                      </TableCell>
                       <TableCell className="text-sm text-muted-foreground">{att.note || "-"}</TableCell>
-                    </TableRow>
+                    </TableRow>;
+                    })()
                   ))}
                 </TableBody>
               </Table>

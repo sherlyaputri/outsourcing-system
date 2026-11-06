@@ -11,6 +11,7 @@ model User {
   id           String        @id @default(cuid())
   email        String        @unique
   password     String
+  initialPasswordEncrypted String? @db.Text
   name         String
   role         String // MITRA, VENDOR, VM, SM, GM, COO
   status       String        @default("ACTIVE") // ACTIVE, INACTIVE, PENDING
@@ -57,6 +58,7 @@ model MitraProfile {
   vendor         Vendor    @relation(fields: [vendorId], references: [id])
   idMitraOs      String?
   nik            String?
+  waktuKerja     String?
   tempatLahir    String?
   tanggalLahir   DateTime?
   alamat         String?   @db.Text
@@ -71,6 +73,7 @@ model MitraProfile {
   jenisSim       String?
   noSim          String?
   fotoSim        String?   @db.LongText
+  skck           String?   @db.LongText
   fotoSelfie     String?   @db.LongText
   faceDescriptor String?   @db.Text
   penempatan     String?
@@ -110,6 +113,8 @@ model Attendance {
   fotoCheckOut String?   @db.LongText
   latitude     Float?
   longitude    Float?
+  latitudeCheckOut  Float?
+  longitudeCheckOut Float?
   note         String?   @db.Text
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -163,6 +168,7 @@ model Candidate {
   jenisSim         String?
   noSim            String?
   fotoSim          String?         @db.LongText
+  skck             String?         @db.LongText
   phone            String?
   email            String?
   alamat           String?         @db.Text
@@ -177,6 +183,7 @@ model Candidate {
   vendorEmployeeId String?
   vendorEmployee   VendorEmployee? @relation(fields: [vendorEmployeeId], references: [id], onDelete: SetNull)
   status           String          @default("KANDIDAT") // KANDIDAT, TERPILIH, DITOLAK, ACTIVATED
+  alasanKeputusan  String?         @db.Text
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 }
@@ -191,6 +198,7 @@ model VendorEmployee {
   jenisSim   String
   noSim      String
   fotoSim    String      @db.LongText
+  skck       String?     @db.LongText
   phone      String
   email      String
   alamat     String      @db.Text

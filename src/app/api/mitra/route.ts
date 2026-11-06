@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { supportedShifts } from "@/lib/attendance-shift";
+import { decryptInitialPassword } from "@/lib/initial-password";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +12,9 @@ export async function GET(req: NextRequest) {
     const session = await getServerSession(authOptions);
     if (!session || !["VENDOR", "VM", "SM"].includes(session.user.role)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (session.user.role === "VENDOR" && !session.user.vendorId) {
+      return NextResponse.json({ error: "Akun vendor tidak memiliki vendor terkait." }, { status: 403 });
     }
 
     let where: any = { role: "MITRA" };
@@ -26,9 +31,37 @@ export async function GET(req: NextRequest) {
 
     const mitras = await prisma.user.findMany({
       where,
-      include: {
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        status: true,
+        phone: true,
+        vendorId: true,
+        initialPasswordEncrypted: true,
         mitraProfile: {
-          include: {
+          select: {
+            id: true,
+            idMitraOs: true,
+            waktuKerja: true,
+            posisi: true,
+            penempatan: true,
+            alamat: true,
+            kelurahan: true,
+            kecamatan: true,
+            kabKota: true,
+            provinsi: true,
+            fotoKtp: true,
+            jenisSim: true,
+            noSim: true,
+            fotoSim: true,
+            skck: true,
+            namaBank: true,
+            noRekening: true,
+            nik: true,
+            tempatLahir: true,
+            tanggalLahir: true,
+            noBpjs: true,
             documents: {
               select: { id: true, name: true, mimeType: true, createdAt: true },
               orderBy: { createdAt: "desc" },
@@ -40,7 +73,12 @@ export async function GET(req: NextRequest) {
       orderBy: { name: "asc" },
     });
 
-    return NextResponse.json(mitras);
+    return NextResponse.json(mitras.map(({ initialPasswordEncrypted, ...mitra }) => ({
+      ...mitra,
+      ...(session.user.role === "VENDOR" || session.user.role === "VM"
+        ? { initialPassword: initialPasswordEncrypted ? decryptInitialPassword(initialPasswordEncrypted) : null }
+        : {}),
+    })));
   } catch (error) {
     console.error("Mitra GET error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
@@ -64,6 +102,7 @@ export async function PUT(req: NextRequest) {
       name,
       email,
       phone,
+      waktuKerja,
       tempatLahir,
       tanggalLahir,
       alamat,
@@ -89,6 +128,12 @@ export async function PUT(req: NextRequest) {
     }
     if (typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       return NextResponse.json({ error: "Email harus berformat nama@domain.com." }, { status: 400 });
+    }
+    if (waktuKerja !== undefined && (
+      typeof waktuKerja !== "string" ||
+      !supportedShifts.some((shift) => shift === waktuKerja)
+    )) {
+      return NextResponse.json({ error: "Jadwal shift tidak valid." }, { status: 400 });
     }
     const textFields = [
       phone, tempatLahir, alamat, kelurahan, kecamatan, kabKota, provinsi,
@@ -143,13 +188,13 @@ export async function PUT(req: NextRequest) {
 
     const mitra = await prisma.user.findFirst({
       where: { id: userId, vendorId: session.user.vendorId, role: "MITRA" },
-      include: { mitraProfile: { select: { id: true } } },
+      include: { mitraProfile: { select: { id: true, waktuKerja: true } } },
     });
     if (!mitra) {
       return NextResponse.json({ error: "Mitra tidak ditemukan." }, { status: 404 });
     }
-    if (!mitra.mitraProfile) {
-      return NextResponse.json({ error: "Profil Mitra belum dibuat melalui proses aktivasi." }, { status: 409 });
+    if (!mitra.mitraProfile && !waktuKerja) {
+      return NextResponse.json({ error: "Jadwal shift wajib diisi untuk membuat profil Mitra." }, { status: 400 });
     }
     const existingEmail = await prisma.user.findFirst({
       where: { email: email.trim().toLowerCase(), id: { not: userId } },
@@ -168,23 +213,31 @@ export async function PUT(req: NextRequest) {
         await tx.user.update({ where: { id: userId }, data: { phone: phone?.trim() || null } });
       }
 
-      const updatedProfile = await tx.mitraProfile.update({
+      const profileFields = {
+        waktuKerja: waktuKerja ?? undefined,
+        tempatLahir: tempatLahir?.trim() || null,
+        tanggalLahir: tanggalLahir ? new Date(tanggalLahir) : null,
+        alamat: alamat?.trim() || null,
+        kelurahan: kelurahan?.trim() || null,
+        kecamatan: kecamatan?.trim() || null,
+        kabKota: kabKota?.trim() || null,
+        provinsi: provinsi?.trim() || null,
+        noBpjs: noBpjs?.trim() || null,
+        noRekening: noRekening?.trim() || null,
+        namaBank: namaBank?.trim() || null,
+        jenisSim: jenisSim?.trim() || null,
+        noSim: noSim?.trim() || null,
+        ...uploadedImages,
+      };
+      const updatedProfile = await tx.mitraProfile.upsert({
         where: { userId },
-        data: {
-          tempatLahir: tempatLahir?.trim() || null,
-          tanggalLahir: tanggalLahir ? new Date(tanggalLahir) : null,
-          alamat: alamat?.trim() || null,
-          kelurahan: kelurahan?.trim() || null,
-          kecamatan: kecamatan?.trim() || null,
-          kabKota: kabKota?.trim() || null,
-          provinsi: provinsi?.trim() || null,
-          noBpjs: noBpjs?.trim() || null,
-          noRekening: noRekening?.trim() || null,
-          namaBank: namaBank?.trim() || null,
-          jenisSim: jenisSim?.trim() || null,
-          noSim: noSim?.trim() || null,
-          ...uploadedImages,
+        create: {
+          userId,
+          vendorId: session.user.vendorId!,
+          ...profileFields,
+          waktuKerja: waktuKerja!,
         },
+        update: profileFields,
       });
 
       if (validatedDocuments.length > 0) {

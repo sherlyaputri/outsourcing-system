@@ -14,6 +14,7 @@ interface CandidatePayload {
   jenisSim: string;
   noSim: string;
   fotoSim: string;
+  skck: string;
   phone: string;
   email: string;
   alamat: string;
@@ -36,9 +37,17 @@ function isValidImage(value: unknown): value is string {
   return Boolean(match && Buffer.from(match[1], "base64").length <= maxImageBytes);
 }
 
+function isValidSkck(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const match = value.match(/^data:(application\/pdf|image\/jpeg|image\/png);base64,([A-Za-z0-9+/]+=*)$/);
+  if (!match) return false;
+  const size = Buffer.from(match[2], "base64").length;
+  return size > 0 && size <= maxImageBytes;
+}
+
 function isCandidatePayload(candidate: Record<string, unknown>): candidate is Record<string, unknown> & CandidatePayload {
   return [
-    "name", "nik", "fotoKtp", "jenisSim", "noSim", "fotoSim", "phone", "email",
+    "name", "nik", "fotoKtp", "jenisSim", "noSim", "fotoSim", "skck", "phone", "email",
     "alamat", "kelurahan", "kecamatan", "kabKota", "provinsi",
   ].every((field) => typeof candidate[field] === "string")
     && (candidate.vendorEmployeeId === null || typeof candidate.vendorEmployeeId === "string");
@@ -115,6 +124,7 @@ export async function POST(req: NextRequest) {
         jenisSim: employee.jenisSim,
         noSim: employee.noSim,
         fotoSim: employee.fotoSim,
+        skck: employee.skck,
         phone: employee.phone,
         email: employee.email,
         alamat: employee.alamat,
@@ -152,6 +162,9 @@ export async function POST(req: NextRequest) {
       }
       if (!isValidImage(candidate.fotoSim)) {
         return NextResponse.json({ error: "Foto SIM wajib berupa JPG/PNG dan maksimal 5 MB." }, { status: 400 });
+      }
+      if (!isValidSkck(candidate.skck)) {
+        return NextResponse.json({ error: "SKCK wajib berupa PDF/JPG/PNG maksimal 5 MB." }, { status: 400 });
       }
       if (typeof candidate.phone !== "string" || !/^08\d{8,12}$/.test(candidate.phone.trim())) {
         return NextResponse.json({ error: "No. HP hanya boleh angka dan harus berformat 08xxxxxxxxxxxx." }, { status: 400 });
@@ -226,6 +239,7 @@ export async function POST(req: NextRequest) {
       total +
       Buffer.from(candidate.fotoKtp.split(",")[1], "base64").length +
       Buffer.from(candidate.fotoSim.split(",")[1], "base64").length
+      + Buffer.from(candidate.skck.split(",")[1], "base64").length
     ), 0);
     if (totalPhotoBytes > 15 * 1024 * 1024) {
       return NextResponse.json({ error: "Total ukuran foto per pengiriman maksimal 15 MB." }, { status: 400 });
@@ -277,6 +291,7 @@ export async function POST(req: NextRequest) {
             jenisSim: candidate.jenisSim,
             noSim: candidate.noSim,
             fotoSim: candidate.fotoSim,
+            skck: candidate.skck,
             phone: candidate.phone,
             email: emails[index],
             alamat: candidate.alamat,
@@ -318,6 +333,12 @@ export async function PATCH(req: NextRequest) {
     if (!isNonEmptyString(candidateId) || !["APPROVED", "REJECTED"].includes(decision)) {
       return NextResponse.json({ error: "Keputusan kandidat tidak valid." }, { status: 400 });
     }
+    if (!isNonEmptyString(body.alasanKeputusan)) {
+      return NextResponse.json({ error: "Alasan keputusan wajib diisi." }, { status: 400 });
+    }
+    if (body.alasanKeputusan.trim().length > 2000) {
+      return NextResponse.json({ error: "Alasan keputusan maksimal 2.000 karakter." }, { status: 400 });
+    }
 
     const result = await prisma.$transaction(async (tx) => {
       const candidate = await tx.candidate.findFirst({
@@ -350,7 +371,10 @@ export async function PATCH(req: NextRequest) {
 
       const updatedCandidate = await tx.candidate.updateMany({
         where: { id: candidate.id, status: "KANDIDAT" },
-        data: { status: decision === "APPROVED" ? "TERPILIH" : "DITOLAK" },
+        data: {
+          status: decision === "APPROVED" ? "TERPILIH" : "DITOLAK",
+          alasanKeputusan: body.alasanKeputusan.trim(),
+        },
       });
       if (updatedCandidate.count !== 1) return null;
 
@@ -379,7 +403,7 @@ export async function PATCH(req: NextRequest) {
               osRequestId: candidate.osRequestId,
               status: "KANDIDAT",
             },
-            data: { status: "DITOLAK" },
+            data: { status: "DITOLAK", alasanKeputusan: "Kuota kandidat diterima telah terpenuhi." },
           })).count;
           const accountRequestIds = remainingCandidates
             .map((remainingCandidate) => remainingCandidate.accountRequestId)

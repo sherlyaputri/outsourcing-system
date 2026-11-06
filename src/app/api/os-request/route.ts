@@ -34,12 +34,14 @@ export async function GET(req: NextRequest) {
           jenisSim: true,
           noSim: true,
           fotoSim: true,
+          skck: true,
           alamat: true,
           kelurahan: true,
           kecamatan: true,
           kabKota: true,
           provinsi: true,
           status: true,
+          alasanKeputusan: true,
           accountRequest: { select: { status: true } },
         }
       : {
