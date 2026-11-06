@@ -6,6 +6,7 @@ import { Prisma } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { randomInt } from "node:crypto";
 import { encryptInitialPassword, generateInitialPassword } from "@/lib/initial-password";
+import { MitraRosterDataIncompleteError, returnMitraToRoster } from "@/lib/mitra-roster";
 
 class CandidateQuotaReachedError extends Error {}
 
@@ -155,7 +156,10 @@ export async function PATCH(req: NextRequest) {
       where: { id: requestId },
       include: {
         candidate: {
-          include: { osRequest: true },
+          include: {
+            osRequest: true,
+            replacementMitraProfile: true,
+          },
         },
       },
     });
@@ -216,10 +220,11 @@ export async function PATCH(req: NextRequest) {
           await tx.mitraProfile.create({
             data: {
               userId: user.id,
-              vendorId: accountReq.vendorId,
+              vendorId: accountReq.candidate.replacementMitraProfile?.vendorId || accountReq.vendorId,
               idMitraOs: await generateMitraOsId(tx),
               nik: accountReq.candidate.nik,
-              waktuKerja: accountReq.candidate.osRequest.waktuKerja,
+              waktuKerja: accountReq.candidate.replacementMitraProfile?.waktuKerja
+                || accountReq.candidate.osRequest.waktuKerja,
               fotoKtp: accountReq.candidate.fotoKtp,
               jenisSim: accountReq.candidate.jenisSim,
               noSim: accountReq.candidate.noSim,
@@ -230,8 +235,10 @@ export async function PATCH(req: NextRequest) {
               kecamatan: accountReq.candidate.kecamatan,
               kabKota: accountReq.candidate.kabKota,
               provinsi: accountReq.candidate.provinsi,
-              posisi: accountReq.candidate.osRequest.posisi,
-              penempatan: accountReq.candidate.osRequest.penempatan,
+              posisi: accountReq.candidate.replacementMitraProfile?.posisi
+                || accountReq.candidate.osRequest.posisi,
+              penempatan: accountReq.candidate.replacementMitraProfile?.penempatan
+                || accountReq.candidate.osRequest.penempatan,
             },
           });
           await tx.candidate.update({
@@ -243,6 +250,9 @@ export async function PATCH(req: NextRequest) {
               where: { id: accountReq.candidate.vendorEmployeeId },
               data: { status: "HIRED" },
             });
+          }
+          if (accountReq.candidate.replacementMitraProfileId) {
+            await returnMitraToRoster(tx, accountReq.candidate.replacementMitraProfileId);
           }
 
           const updatedRequest = await tx.accountRequest.update({
@@ -333,6 +343,9 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json(result);
   } catch (error) {
     console.error("Account Request PATCH error:", error);
+    if (error instanceof MitraRosterDataIncompleteError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     if (error instanceof CandidateQuotaReachedError) {
       return NextResponse.json({ error: "Jumlah kandidat yang diaktifkan sudah memenuhi kuota Request OS." }, { status: 409 });
     }

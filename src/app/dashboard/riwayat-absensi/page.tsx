@@ -50,6 +50,7 @@ export default function RiwayatAbsensiPage() {
   const [attendances, setAttendances] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPhoto, setSelectedPhoto] = useState<{ src: string; title: string } | null>(null);
+  const [sort, setSort] = useState<{ column: string; direction: "asc" | "desc" } | null>(null);
   const [month, setMonth] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -65,6 +66,46 @@ export default function RiwayatAbsensiPage() {
       })
       .catch(() => setLoading(false));
   }, [month]);
+
+  const columns = [
+    ...(session?.user.role !== "MITRA" ? [{ key: "name", label: "Nama" }] : []),
+    { key: "date", label: "Tanggal" },
+    { key: "checkIn", label: "Check-In" },
+    { key: "checkOut", label: "Check-Out" },
+    { key: "location", label: "Lokasi GPS" },
+    { key: "photo", label: "Foto" },
+    { key: "status", label: "Status" },
+    { key: "note", label: "Catatan" },
+  ];
+  const sortedAttendances = sort
+    ? [...attendances].sort((left, right) => {
+        const getValue = (attendance: AttendanceRecord): string | number => {
+          switch (sort.column) {
+            case "name": return attendance.user?.name || "";
+            case "date": return new Date(attendance.date).getTime();
+            case "checkIn": return attendance.checkIn ? new Date(attendance.checkIn).getTime() : "";
+            case "checkOut": return attendance.checkOut ? new Date(attendance.checkOut).getTime() : "";
+            case "location": return `${attendance.latitude ?? ""} ${attendance.longitude ?? ""}`;
+            case "photo": return Number(Boolean(attendance.fotoCheckIn || attendance.fotoCheckOut));
+            case "status": {
+              const start = attendance.checkIn
+                ? getShiftStartAt(new Date(attendance.checkIn), attendance.user?.mitraProfile?.waktuKerja)
+                : null;
+              return attendance.type === "HADIR" && start && new Date(attendance.checkIn!) > start
+                ? "Hadir (telat)"
+                : attendance.type;
+            }
+            default: return attendance.note || "";
+          }
+        };
+        const leftValue = getValue(left);
+        const rightValue = getValue(right);
+        const comparison = typeof leftValue === "number" && typeof rightValue === "number"
+          ? leftValue - rightValue
+          : String(leftValue).localeCompare(String(rightValue), "id", { numeric: true, sensitivity: "base" });
+        return sort.direction === "asc" ? comparison : -comparison;
+      })
+    : attendances;
 
   return (
     <DashboardLayout allowedRoles={["MITRA", "VENDOR", "VM"]}>
@@ -103,18 +144,31 @@ export default function RiwayatAbsensiPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    {session?.user.role !== "MITRA" && <TableHead>Nama</TableHead>}
-                    <TableHead>Tanggal</TableHead>
-                    <TableHead>Check-In</TableHead>
-                    <TableHead>Check-Out</TableHead>
-                    <TableHead>Lokasi GPS</TableHead>
-                    <TableHead>Foto</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Catatan</TableHead>
+                    {columns.map(({ key, label }) => (
+                      <TableHead key={key} aria-sort={
+                        sort?.column === key
+                          ? sort.direction === "asc" ? "ascending" : "descending"
+                          : "none"
+                      }>
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1 text-left"
+                          onClick={() => setSort((current) => ({
+                            column: key,
+                            direction: current?.column === key && current.direction === "asc" ? "desc" : "asc",
+                          }))}
+                        >
+                          {label}
+                          <span className="text-xs text-muted-foreground">
+                            {sort?.column === key ? (sort.direction === "asc" ? "A-Z" : "Z-A") : "↕"}
+                          </span>
+                        </button>
+                      </TableHead>
+                    ))}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {attendances.map((att) => (
+                  {sortedAttendances.map((att) => (
                     (() => {
                       const shift = att.user?.mitraProfile?.waktuKerja;
                       const scheduledStart = att.checkIn

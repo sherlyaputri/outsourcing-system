@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
         ...(availableOnly ? {
           status: "ACTIVE",
           skck: { not: null },
-          candidates: { none: { status: { in: ["KANDIDAT", "TERPILIH", "ACTIVATED"] } } },
+          candidates: { none: { status: { in: ["KANDIDAT", "TERPILIH"] } } },
         } : {}),
       },
       select: {

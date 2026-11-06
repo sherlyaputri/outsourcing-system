@@ -23,6 +23,7 @@ interface CandidatePayload {
   kabKota: string;
   provinsi: string;
   vendorEmployeeId: string | null;
+  replacementMitraProfileId?: string | null;
 }
 
 const maxImageBytes = 5 * 1024 * 1024;
@@ -83,11 +84,22 @@ export async function POST(req: NextRequest) {
         vendorId,
         status: "VENDOR_SELECTED",
       },
-      select: { id: true, jumlah: true },
+      select: { id: true, jumlah: true, type: true, mitraTargets: true },
     });
 
     if (!osRequest) {
       return NextResponse.json({ error: "Request tidak ditemukan atau tidak dapat menerima kandidat." }, { status: 404 });
+    }
+    const replacementTargetIds = Array.isArray(osRequest.mitraTargets)
+      ? osRequest.mitraTargets.filter((id): id is string => typeof id === "string")
+      : [];
+    if (osRequest.type === "PERGANTIAN" && (
+      candidateEntries.length !== osRequest.jumlah
+      || replacementTargetIds.length !== osRequest.jumlah
+    )) {
+      return NextResponse.json({
+        error: "Untuk pergantian, jumlah kandidat harus sama dengan jumlah Mitra OS yang dipilih.",
+      }, { status: 400 });
     }
 
     const employeeIds = candidateEntries.flatMap((candidate) =>
@@ -103,7 +115,7 @@ export async function POST(req: NextRequest) {
             id: { in: employeeIds },
             vendorId,
             status: "ACTIVE",
-            candidates: { none: { status: { in: ["KANDIDAT", "TERPILIH", "ACTIVATED"] } } },
+            candidates: { none: { status: { in: ["KANDIDAT", "TERPILIH"] } } },
           },
         })
       : [];
@@ -111,12 +123,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Salah satu data karyawan tidak tersedia atau sudah diajukan." }, { status: 409 });
     }
     const employeesById = new Map(employees.map((employee) => [employee.id, employee]));
-    const submittedCandidates = candidateEntries.map((candidate) => {
+    const submittedCandidates = candidateEntries.map((candidate, index) => {
+      const replacementMitraProfileId = osRequest.type === "PERGANTIAN"
+        ? replacementTargetIds[index]
+        : null;
       if (!isNonEmptyString(candidate.employeeId)) {
-        return { ...candidate, vendorEmployeeId: null };
+        return { ...candidate, vendorEmployeeId: null, replacementMitraProfileId };
       }
       const employee = employeesById.get(candidate.employeeId);
-      if (!employee) return candidate;
+      if (!employee) return { ...candidate, replacementMitraProfileId };
       return {
         name: employee.name,
         nik: employee.nik,
@@ -133,6 +148,7 @@ export async function POST(req: NextRequest) {
         kabKota: employee.kabKota,
         provinsi: employee.provinsi,
         vendorEmployeeId: employee.id,
+        replacementMitraProfileId,
       };
     });
 
@@ -300,6 +316,7 @@ export async function POST(req: NextRequest) {
             kabKota: candidate.kabKota,
             provinsi: candidate.provinsi,
             vendorEmployeeId: candidate.vendorEmployeeId,
+            replacementMitraProfileId: candidate.replacementMitraProfileId || null,
           },
         });
       }

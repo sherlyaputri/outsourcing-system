@@ -23,7 +23,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
 
     // VM selects vendor
-    if (action === "SELECT_VENDOR" && session.user.role === "VM") {
+    if (action === "SELECT_VENDOR" && session.user.role === "VM" && osRequest.type === "PENAMBAHAN") {
       if (osRequest.status !== "APPROVED_COO" || !vendorId) {
         return NextResponse.json({ error: "Request belum siap dipilihkan vendor" }, { status: 400 });
       }
@@ -41,7 +41,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         where: { id: params.id },
         data: {
           vendorId,
-          status: osRequest.type === "PENGURANGAN" ? "COMPLETED" : "VENDOR_SELECTED",
+          status: "VENDOR_SELECTED",
         },
       });
       return NextResponse.json(updated);

@@ -85,6 +85,7 @@ model MitraProfile {
   updatedAt      DateTime  @updatedAt
 
   documents MitraDocument[]
+  replacementCandidates Candidate[] @relation("ReplacementTarget")
 
   @@index([idMitraOs])
 }
@@ -131,6 +132,7 @@ model OSRequest {
   jumlah       Int      @default(1)
   idPergantian String?
   idMitraOs    String?
+  mitraTargets Json?
   posisi       String?
   penempatan   String?
   waktuKerja   String?
@@ -182,6 +184,8 @@ model Candidate {
   accountRequest   AccountRequest? @relation(fields: [accountRequestId], references: [id])
   vendorEmployeeId String?
   vendorEmployee   VendorEmployee? @relation(fields: [vendorEmployeeId], references: [id], onDelete: SetNull)
+  replacementMitraProfileId String?
+  replacementMitraProfile MitraProfile? @relation("ReplacementTarget", fields: [replacementMitraProfileId], references: [id], onDelete: SetNull)
   status           String          @default("KANDIDAT") // KANDIDAT, TERPILIH, DITOLAK, ACTIVATED
   alasanKeputusan  String?         @db.Text
   createdAt        DateTime        @default(now())

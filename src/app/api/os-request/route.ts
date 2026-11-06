@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
+import { MitraRosterDataIncompleteError, returnMitraToRoster } from "@/lib/mitra-roster";
 
 export async function GET(req: NextRequest) {
   try {
@@ -101,23 +102,56 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Jumlah harus minimal 1" }, { status: 400 });
     }
 
-    const needsMitraId = type === "PERGANTIAN" || type === "PENGURANGAN";
-    if (needsMitraId && (!idMitraOs || !String(idMitraOs).trim())) {
-      return NextResponse.json({ error: "ID Mitra OS wajib untuk permintaan Pergantian atau Pengurangan" }, { status: 400 });
+    if (jumlah > 10) {
+      return NextResponse.json({ error: "Jumlah maksimal 10 mitra dalam satu request." }, { status: 400 });
     }
 
-    if (needsMitraId) {
-      const mitraProfile = await prisma.mitraProfile.findFirst({
-        where: {
-          idMitraOs: String(idMitraOs).trim(),
-          user: { role: "MITRA", status: "ACTIVE" },
-        },
-        select: { id: true },
-      });
+    const needsMitraId = type === "PERGANTIAN" || type === "PENGURANGAN";
+    const mitraOsIds = needsMitraId
+      ? Array.isArray(body.mitraOsIds)
+        ? body.mitraOsIds.filter((id: unknown): id is string => typeof id === "string").map((id: string) => id.trim())
+        : typeof idMitraOs === "string" ? [idMitraOs.trim()] : []
+      : [];
+    if (needsMitraId && (mitraOsIds.length !== jumlah || mitraOsIds.some((id: string) => !id))) {
+      return NextResponse.json({ error: "Pilih satu ID Mitra OS untuk setiap mitra yang dikurangi atau diganti." }, { status: 400 });
+    }
+    if (new Set(mitraOsIds).size !== mitraOsIds.length) {
+      return NextResponse.json({ error: "ID Mitra OS yang sama tidak boleh dipilih lebih dari sekali." }, { status: 400 });
+    }
 
-      if (!mitraProfile) {
-        return NextResponse.json({ error: "ID Mitra OS tidak ditemukan atau tidak aktif" }, { status: 400 });
-      }
+    const targetProfiles = needsMitraId
+      ? await prisma.mitraProfile.findMany({
+          where: {
+            idMitraOs: { in: mitraOsIds },
+            status: "ACTIVE",
+            user: { role: "MITRA", status: "ACTIVE" },
+          },
+          include: { user: { select: { vendorId: true } } },
+        })
+      : [];
+    if (needsMitraId && targetProfiles.length !== mitraOsIds.length) {
+      return NextResponse.json({ error: "Salah satu ID Mitra OS tidak ditemukan atau sudah tidak aktif." }, { status: 400 });
+    }
+    type TargetProfile = Prisma.MitraProfileGetPayload<{
+      include: { user: { select: { vendorId: true } } };
+    }>;
+    const profilesByMitraId = new Map<string, TargetProfile>();
+    targetProfiles.forEach((profile: TargetProfile) => {
+      if (profile.idMitraOs) profilesByMitraId.set(profile.idMitraOs, profile);
+    });
+    const orderedTargetProfiles: TargetProfile[] = mitraOsIds.map((mitraOsId: string) => {
+      const profile = profilesByMitraId.get(mitraOsId);
+      if (!profile) throw new Error(`Mitra profile for ${mitraOsId} was not found`);
+      return profile;
+    });
+
+    const targetVendorId = orderedTargetProfiles[0]?.user.vendorId;
+    if (needsMitraId && (!targetVendorId || orderedTargetProfiles.some((profile) => profile.user.vendorId !== targetVendorId))) {
+      return NextResponse.json({ error: "Semua mitra dalam satu request harus berasal dari Vendor yang sama." }, { status: 400 });
+    }
+    const targetPlacements = new Set(orderedTargetProfiles.map((profile) => profile.penempatan));
+    if (needsMitraId && targetPlacements.size > 1) {
+      return NextResponse.json({ error: "Wilayah operasional semua mitra yang dipilih harus sama dalam satu request." }, { status: 400 });
     }
 
     const allowedPositions = [
@@ -141,19 +175,33 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Kode kantor tidak valid" }, { status: 400 });
     }
 
-    const osRequest = await prisma.oSRequest.create({
-      data: {
-        type,
-        jumlah,
-        idMitraOs: needsMitraId ? String(idMitraOs).trim() : null,
-        idPergantian: type === "PERGANTIAN" ? String(idMitraOs).trim() : null,
-        posisi,
-        penempatan,
-        waktuKerja,
-        alasan,
-        requesterId: session.user.id,
-        status: "PENDING",
-      },
+    if (needsMitraId && orderedTargetProfiles[0].penempatan !== penempatan) {
+      return NextResponse.json({ error: "Wilayah operasional harus mengikuti mitra yang dipilih." }, { status: 400 });
+    }
+
+    const osRequest = await prisma.$transaction(async (tx) => {
+      const request = await tx.oSRequest.create({
+        data: {
+          type,
+          jumlah,
+          idMitraOs: needsMitraId ? mitraOsIds[0] : null,
+          mitraTargets: needsMitraId ? orderedTargetProfiles.map((profile) => profile.id) : Prisma.JsonNull,
+          idPergantian: type === "PERGANTIAN" ? mitraOsIds[0] : null,
+          posisi,
+          penempatan,
+          waktuKerja,
+          alasan,
+          requesterId: session.user.id,
+          vendorId: targetVendorId || null,
+          status: type === "PENAMBAHAN" ? "PENDING" : type === "PERGANTIAN" ? "VENDOR_SELECTED" : "COMPLETED",
+        },
+      });
+      if (type === "PENGURANGAN") {
+        for (const profile of orderedTargetProfiles) {
+          await returnMitraToRoster(tx, profile.id);
+        }
+      }
+      return request;
     });
 
     // If PENAMBAHAN, create GM approval
@@ -170,17 +218,14 @@ export async function POST(req: NextRequest) {
           },
         });
       }
-    } else {
-      // PERGANTIAN or PENGURANGAN goes directly to VM for vendor selection
-      await prisma.oSRequest.update({
-        where: { id: osRequest.id },
-        data: { status: "APPROVED_COO" }, // skip approval, go to VM
-      });
     }
 
     return NextResponse.json(osRequest);
   } catch (error) {
     console.error("OS Request POST error:", error);
+    if (error instanceof MitraRosterDataIncompleteError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
+    }
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }

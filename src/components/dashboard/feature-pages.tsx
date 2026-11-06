@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, ReactNode, useEffect, useState } from "react";
+import { Children, FormEvent, isValidElement, ReactNode, useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
 import DashboardLayout from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,6 +36,7 @@ interface Mitra {
   vendor?: { name: string } | null;
   mitraProfile?: {
     idMitraOs?: string | null;
+    vendorId?: string;
     waktuKerja?: string | null;
     posisi?: string | null;
     penempatan?: string | null;
@@ -182,6 +183,7 @@ interface OSRequest {
   jumlah: number;
   idPergantian?: string | null;
   idMitraOs?: string | null;
+  mitraTargets?: string[] | null;
   posisi?: string | null;
   penempatan?: string | null;
   waktuKerja?: string | null;
@@ -297,16 +299,69 @@ function DataTable({
   headers: string[];
   children: ReactNode;
 }) {
+  const [sort, setSort] = useState<{ column: number; direction: "asc" | "desc" } | null>(null);
+  const rows = Children.toArray(children);
+  const sortedRows = sort
+    ? [...rows].sort((left, right) => {
+        const getCellText = (row: ReactNode, column: number) => {
+          if (!isValidElement<{ children?: ReactNode }>(row)) return "";
+          const cells = Children.toArray(row.props.children);
+          const cell = cells[column];
+          return isValidElement<{ children?: ReactNode }>(cell)
+            ? getSortableText(cell.props.children)
+            : getSortableText(cell);
+        };
+        const comparison = getCellText(left, sort.column).localeCompare(
+          getCellText(right, sort.column),
+          "id",
+          { numeric: true, sensitivity: "base" },
+        );
+        return sort.direction === "asc" ? comparison : -comparison;
+      })
+    : rows;
+
   return (
     <Table>
       <TableHeader>
         <TableRow>
-          {headers.map((header) => <TableHead key={header}>{header}</TableHead>)}
+          {headers.map((header, column) => (
+            <TableHead key={header} aria-sort={
+              sort?.column === column
+                ? sort.direction === "asc" ? "ascending" : "descending"
+                : "none"
+            }>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 text-left"
+                onClick={() => setSort((current) => ({
+                  column,
+                  direction: current?.column === column && current.direction === "asc" ? "desc" : "asc",
+                }))}
+              >
+                {header}
+                <span className="text-xs text-muted-foreground">
+                  {sort?.column === column ? (sort.direction === "asc" ? "A-Z" : "Z-A") : "↕"}
+                </span>
+              </button>
+            </TableHead>
+          ))}
         </TableRow>
       </TableHeader>
-      <TableBody>{children}</TableBody>
+      <TableBody>{sortedRows}</TableBody>
     </Table>
   );
+}
+
+function getSortableText(value: ReactNode): string {
+  if (value == null || typeof value === "boolean") return "";
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (Array.isArray(value)) return value.map(getSortableText).join(" ");
+  if (isValidElement<{ children?: ReactNode; status?: string; "aria-label"?: string }>(value)) {
+    return getSortableText(
+      value.props.children ?? value.props["aria-label"] ?? value.props.status ?? "",
+    );
+  }
+  return "";
 }
 
 function LoadingError({
@@ -675,16 +730,24 @@ function MitraIdPicker({
   mitras,
   value,
   onChange,
+  label = "ID Mitra OS",
+  inputId = "idMitraOs",
+  excludedIds = [],
 }: {
   mitras: Mitra[];
   value: string;
   onChange: (id: string) => void;
+  label?: string;
+  inputId?: string;
+  excludedIds?: string[];
 }) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const optionsId = `${inputId}-options`;
   const selectedMitra = mitras.find((mitra) => mitra.mitraProfile?.idMitraOs === value);
   const matches = query.trim()
     ? mitras.filter((mitra) => mitra.status === "ACTIVE").filter((mitra) => {
+        if (excludedIds.includes(mitra.mitraProfile?.idMitraOs || "")) return false;
         const code = mitra.mitraProfile?.idMitraOs || "";
         const search = query.trim().toLocaleLowerCase();
         return code.toLocaleLowerCase().includes(search) || mitra.name.toLocaleLowerCase().includes(search);
@@ -693,9 +756,9 @@ function MitraIdPicker({
 
   return (
     <div className="relative space-y-1 text-sm">
-      <label htmlFor="idMitraOs" className="font-medium">ID Mitra OS<RequiredMark /></label>
+      <label htmlFor={inputId} className="font-medium">{label}<RequiredMark /></label>
       <input
-        id="idMitraOs"
+        id={inputId}
         className={fieldClass}
         value={selectedMitra ? `${selectedMitra.mitraProfile?.idMitraOs} - ${selectedMitra.name}` : query}
         onChange={(event) => {
@@ -709,12 +772,12 @@ function MitraIdPicker({
         autoComplete="off"
         role="combobox"
         aria-expanded={open && matches.length > 0}
-        aria-controls="mitra-os-options"
+        aria-controls={optionsId}
         aria-autocomplete="list"
         required
       />
       {open && matches.length > 0 && (
-        <ul id="mitra-os-options" role="listbox" className="absolute z-20 max-h-56 w-full overflow-auto rounded-md border bg-white py-1 shadow-lg">
+        <ul id={optionsId} role="listbox" className="absolute z-20 max-h-56 w-full overflow-auto rounded-md border bg-white py-1 shadow-lg">
           {matches.map((mitra) => (
             <li key={mitra.id} role="option" aria-selected={mitra.mitraProfile?.idMitraOs === value}>
               <button
@@ -1223,9 +1286,15 @@ function VendorCandidateForm({
   onClose: () => void;
 }) {
   const employees = useApiData<VendorEmployee[]>("/api/vendor-employee?available=true", []);
-  const [candidates, setCandidates] = useState<CandidateSubmissionDraft[]>([
-    { ...emptyCandidate(), source: "NEW", employeeId: "" },
-  ]);
+  const targetMitras = useApiData<Mitra[]>("/api/mitra", []);
+  const initialCandidateCount = request.type === "PERGANTIAN" ? request.jumlah : 1;
+  const [candidates, setCandidates] = useState<CandidateSubmissionDraft[]>(
+    Array.from({ length: initialCandidateCount }, () => ({
+      ...emptyCandidate(),
+      source: "NEW",
+      employeeId: "",
+    })),
+  );
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -1240,6 +1309,10 @@ function VendorCandidateForm({
     setError(null);
     if (candidates.length < 1 || candidates.length > 10) {
       setError("Vendor dapat mengirim 1 sampai 10 kandidat untuk setiap request.");
+      return;
+    }
+    if (request.type === "PERGANTIAN" && candidates.length !== request.jumlah) {
+      setError("Jumlah kandidat harus sama dengan jumlah Mitra OS yang diganti.");
       return;
     }
     if (candidates.some((candidate) => candidate.source === "EMPLOYEE" && !candidate.employeeId)) {
@@ -1306,7 +1379,13 @@ function VendorCandidateForm({
       <DialogContent>
         <div className="mb-5 grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-3">
           <p>Jenis Permintaan: <strong>{request.type}</strong></p>
-          {request.type === "PERGANTIAN" && <p>ID Pergantian: <strong>{request.idMitraOs || request.idPergantian || "-"}</strong></p>}
+          {request.type === "PERGANTIAN" && (
+            <p className="sm:col-span-2">
+              ID Mitra yang diganti: <strong>{request.mitraTargets?.map((profileId) => (
+                targetMitras.data.find((mitra) => mitra.mitraProfile?.id === profileId)?.mitraProfile?.idMitraOs || "-"
+              )).join(", ") || request.idMitraOs || request.idPergantian || "-"}</strong>
+            </p>
+          )}
           <p>Posisi Kebutuhan: <strong>{request.posisi || "-"}</strong></p>
           <p>Wilayah Operasional: <strong>{request.penempatan || "-"}</strong></p>
           <p>Waktu Kerja: <strong>{request.waktuKerja || "-"}</strong></p>
@@ -1316,7 +1395,29 @@ function VendorCandidateForm({
           {candidates.map((candidate, index) => (
             <div key={index} className="space-y-2">
               <fieldset className="rounded-md border p-4">
-                <legend className="px-1 text-sm font-medium">Kandidat {index + 1}</legend>
+                <legend className="px-1 text-sm font-medium">
+                  Kandidat {index + 1}
+                  {request.type === "PERGANTIAN" && (() => {
+                    const targetId = request.mitraTargets?.[index];
+                    const target = targetMitras.data.find((mitra) => mitra.mitraProfile?.id === targetId);
+                    return target ? ` · Mengganti ${target.mitraProfile?.idMitraOs || target.name}` : "";
+                  })()}
+                </legend>
+                {request.type === "PERGANTIAN" && targetMitras.data.find(
+                  (mitra) => mitra.mitraProfile?.id === request.mitraTargets?.[index],
+                ) && (() => {
+                  const target = targetMitras.data.find(
+                    (mitra) => mitra.mitraProfile?.id === request.mitraTargets?.[index],
+                  );
+                  return (
+                    <div className="mb-3 rounded-md bg-muted p-3 text-sm">
+                      <p>Nama: {target?.name || "-"}</p>
+                      <p>Posisi: {target?.mitraProfile?.posisi || "-"}</p>
+                      <p>Wilayah: {target?.mitraProfile?.penempatan || "-"}</p>
+                      <p>Waktu kerja: {target?.mitraProfile?.waktuKerja || "-"}</p>
+                    </div>
+                  );
+                })()}
                 <div className="mb-4 grid grid-cols-2 gap-3">
                   <label className="flex cursor-pointer items-center gap-2 rounded-md border p-3 text-sm">
                     <input
@@ -1392,7 +1493,7 @@ function VendorCandidateForm({
                   <CandidateFields candidate={candidate} index={index} update={updateCandidate} />
                 )}
               </fieldset>
-              {candidates.length > 1 && (
+              {candidates.length > 1 && request.type !== "PERGANTIAN" && (
                 <Button
                   type="button"
                   size="sm"
@@ -1411,14 +1512,16 @@ function VendorCandidateForm({
           <FormError error={error} />
           <div className="flex flex-wrap justify-between gap-2">
             <div className="flex gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                disabled={saving || candidates.length >= 10}
-                onClick={() => setCandidates((current) => [...current, { ...emptyCandidate(), source: "NEW", employeeId: "" }])}
-              >
-                + Tambah Kandidat
-              </Button>
+              {request.type !== "PERGANTIAN" && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={saving || candidates.length >= 10}
+                  onClick={() => setCandidates((current) => [...current, { ...emptyCandidate(), source: "NEW", employeeId: "" }])}
+                >
+                  + Tambah Kandidat
+                </Button>
+              )}
               <Button type="button" variant="outline" disabled={saving} onClick={onClose}>Tutup</Button>
             </div>
             <Button type="submit" disabled={saving || candidates.length < 1 || candidates.length > 10}>
@@ -1671,7 +1774,11 @@ export function OSRequestPage() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [requestType, setRequestType] = useState("PENAMBAHAN");
-  const [selectedMitraId, setSelectedMitraId] = useState("");
+  const [selectedMitraIds, setSelectedMitraIds] = useState<string[]>([""]);
+  const [requestQuantity, setRequestQuantity] = useState(1);
+  const [requestPosition, setRequestPosition] = useState("");
+  const [requestPlacement, setRequestPlacement] = useState("");
+  const [requestWorkHours, setRequestWorkHours] = useState("");
   const [requestFormOpen, setRequestFormOpen] = useState(false);
   const [selectedVendors, setSelectedVendors] = useState<Record<string, string>>({});
   const [assigningId, setAssigningId] = useState<string | null>(null);
@@ -1752,11 +1859,43 @@ export function OSRequestPage() {
     }
   }
 
+  function resizeMitraTargets(quantity: number) {
+    const safeQuantity = Math.min(10, Math.max(1, quantity || 1));
+    setRequestQuantity(safeQuantity);
+    setSelectedMitraIds((current) => Array.from(
+      { length: safeQuantity },
+      (_, index) => current[index] || "",
+    ));
+  }
+
+  function updateMitraTarget(index: number, idMitraOs: string) {
+    const next = [...selectedMitraIds];
+    next[index] = idMitraOs;
+    setSelectedMitraIds(next);
+    const firstSelected = mitras.data.find(
+      (mitra) => mitra.mitraProfile?.idMitraOs === next.find(Boolean),
+    );
+    setRequestPosition(firstSelected?.mitraProfile?.posisi || "");
+    setRequestPlacement(firstSelected?.mitraProfile?.penempatan || "");
+    setRequestWorkHours(firstSelected?.mitraProfile?.waktuKerja || "");
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-    if (needsMitraId && !selectedMitraId) {
-      setError("Pilih ID Mitra OS dari daftar terlebih dahulu.");
+    if (needsMitraId && selectedMitraIds.length !== requestQuantity) {
+      setError("Pilih satu ID Mitra OS untuk setiap mitra yang dikurangi atau diganti.");
+      return;
+    }
+    if (needsMitraId && selectedMitraIds.some((id) => !id)) {
+      setError("Lengkapi semua pilihan ID Mitra OS.");
+      return;
+    }
+    const selectedProfiles = selectedMitraIds.map((id) => (
+      mitras.data.find((mitra) => mitra.mitraProfile?.idMitraOs === id)
+    ));
+    if (needsMitraId && new Set(selectedProfiles.map((mitra) => mitra?.mitraProfile?.penempatan)).size > 1) {
+      setError("Wilayah operasional semua mitra yang dipilih harus sama dalam satu request.");
       return;
     }
     setSaving(true);
@@ -1765,15 +1904,19 @@ export function OSRequestPage() {
     try {
       await sendJson("/api/os-request", "POST", {
         type: form.get("type"),
-        jumlah: Number(form.get("jumlah")),
-        idMitraOs: needsMitraId ? selectedMitraId : null,
-        posisi: form.get("posisi"),
-        penempatan: form.get("penempatan"),
-        waktuKerja: form.get("waktuKerja"),
+        jumlah: requestQuantity,
+        mitraOsIds: needsMitraId ? selectedMitraIds : [],
+        posisi: requestPosition,
+        penempatan: requestPlacement,
+        waktuKerja: requestWorkHours,
       });
       formElement.reset();
       setRequestType("PENAMBAHAN");
-      setSelectedMitraId("");
+      setSelectedMitraIds([""]);
+      setRequestQuantity(1);
+      setRequestPosition("");
+      setRequestPlacement("");
+      setRequestWorkHours("");
       setRequestFormOpen(false);
       requests.reload();
     } catch (submitError) {
@@ -1815,7 +1958,16 @@ export function OSRequestPage() {
         <TableRow key={item.id}>
           <TableCell>{item.type}</TableCell>
           <TableCell>{item.jumlah}</TableCell>
-          <TableCell>{(item.type === "PERGANTIAN" || item.type === "PENGURANGAN") ? item.idMitraOs || item.idPergantian || "-" : "-"}</TableCell>
+          <TableCell>
+            {(item.type === "PERGANTIAN" || item.type === "PENGURANGAN") ? (
+              item.mitraTargets?.length
+                ? item.mitraTargets.map((profileId) => {
+                    const target = mitras.data.find((mitra) => mitra.mitraProfile?.id === profileId);
+                    return target?.mitraProfile?.idMitraOs || "-";
+                  }).join(", ")
+                : item.idMitraOs || item.idPergantian || "-"
+            ) : "-"}
+          </TableCell>
           <TableCell>{item.posisi || "-"}</TableCell>
           <TableCell>{item.penempatan || "-"}</TableCell>
           <TableCell>{item.waktuKerja || "-"}</TableCell>
@@ -1911,7 +2063,11 @@ export function OSRequestPage() {
                 value={requestType}
                 onChange={(event) => {
                   setRequestType(event.target.value);
-                  setSelectedMitraId("");
+                  setSelectedMitraIds([""]);
+                  setRequestQuantity(1);
+                  setRequestPosition("");
+                  setRequestPlacement("");
+                  setRequestWorkHours("");
                 }}
               >
                 <option value="PENAMBAHAN">Penambahan</option>
@@ -1921,16 +2077,52 @@ export function OSRequestPage() {
             </label>
             <label className="space-y-1 text-sm">
               Jumlah<RequiredMark />
-              <input className={fieldClass} type="number" min="1" name="jumlah" defaultValue="1" required />
+              <input
+                className={fieldClass}
+                type="number"
+                min="1"
+                max="10"
+                name="jumlah"
+                value={requestQuantity}
+                onChange={(event) => resizeMitraTargets(Number(event.target.value))}
+                required
+              />
             </label>
             {needsMitraId ? (
-              <MitraIdPicker mitras={mitras.data} value={selectedMitraId} onChange={setSelectedMitraId} />
+              <div className="space-y-4 md:col-span-2">
+                {selectedMitraIds.map((id, index) => {
+                  const selected = mitras.data.find((mitra) => mitra.mitraProfile?.idMitraOs === id);
+                  return (
+                    <div key={index} className="grid gap-3 rounded-md border p-3 md:grid-cols-2">
+                      <MitraIdPicker
+                        mitras={mitras.data}
+                        value={id}
+                        label={`Mitra OS ${index + 1}`}
+                        inputId={`idMitraOs-${index}`}
+                        excludedIds={selectedMitraIds.filter((_, selectedIndex) => selectedIndex !== index)}
+                        onChange={(nextId) => updateMitraTarget(index, nextId)}
+                      />
+                      <div className="rounded-md bg-muted p-3 text-sm">
+                        {selected ? (
+                          <>
+                            <p><span className="font-medium">Posisi:</span> {selected.mitraProfile?.posisi || "-"}</p>
+                            <p><span className="font-medium">Wilayah:</span> {selected.mitraProfile?.penempatan || "-"}</p>
+                            <p><span className="font-medium">Waktu kerja:</span> {selected.mitraProfile?.waktuKerja || "-"}</p>
+                          </>
+                        ) : (
+                          <p className="text-muted-foreground">Pilih Mitra OS untuk mengisi detail otomatis.</p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
               <div aria-hidden="true" className="min-h-[65px]" />
             )}
             <label className="space-y-1 text-sm">
               Posisi Kebutuhan<RequiredMark />
-              <select className={fieldClass} name="posisi" required defaultValue="">
+              <select className={fieldClass} name="posisi" required value={requestPosition} onChange={(event) => setRequestPosition(event.target.value)}>
                 <option value="" disabled>Pilih posisi</option>
                 <option value="OS001: Sorter">OS001: Sorter</option>
                 <option value="OS002: Driver Delivery & Pickup">OS002: Driver Delivery &amp; Pickup</option>
@@ -1941,7 +2133,7 @@ export function OSRequestPage() {
             </label>
             <label className="space-y-1 text-sm">
               Wilayah Operasional<RequiredMark />
-              <select className={fieldClass} name="penempatan" required defaultValue="">
+              <select className={fieldClass} name="penempatan" required value={requestPlacement} onChange={(event) => setRequestPlacement(event.target.value)}>
                 <option value="" disabled>Pilih wilayah</option>
                 <option value="kantor1">kantor1</option>
                 <option value="kantor2">kantor2</option>
@@ -1950,7 +2142,7 @@ export function OSRequestPage() {
             </label>
             <label className="space-y-1 text-sm">
               Waktu Kerja<RequiredMark />
-              <select className={fieldClass} name="waktuKerja" required defaultValue="">
+              <select className={fieldClass} name="waktuKerja" required value={requestWorkHours} onChange={(event) => setRequestWorkHours(event.target.value)}>
                 <option value="" disabled>Pilih waktu kerja</option>
                 <option value="08:00-17:00">08:00-17:00</option>
                 <option value="20:00-05:00">20:00-05:00</option>
