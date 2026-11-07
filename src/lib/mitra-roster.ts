@@ -14,23 +14,25 @@ export async function returnMitraToRoster(
     throw new Error(`Mitra profile ${mitraProfileId} was not found`);
   }
 
-  const requiredValues = [
-    profile.nik,
-    profile.fotoKtp,
-    profile.jenisSim,
-    profile.noSim,
-    profile.fotoSim,
-    profile.skck,
-    profile.alamat,
-    profile.kelurahan,
-    profile.kecamatan,
-    profile.kabKota,
-    profile.provinsi,
-    profile.user.phone,
+  const requiredValues: [string, string | null][] = [
+    ["NIK", profile.nik],
+    ["Foto KTP", profile.fotoKtp],
+    ["Jenis SIM", profile.jenisSim],
+    ["Nomor SIM", profile.noSim],
+    ["Foto SIM", profile.fotoSim],
+    ["SKCK", profile.skck],
+    ["No. HP", profile.user.phone],
+    ["Email", profile.user.email],
+    ["Alamat", profile.alamat],
+    ["Kelurahan/Desa", profile.kelurahan],
+    ["Kecamatan", profile.kecamatan],
+    ["Kabupaten/Kota", profile.kabKota],
+    ["Provinsi", profile.provinsi],
   ];
-  if (requiredValues.some((value) => !value?.trim())) {
+  const missingFields = requiredValues.filter(([, value]) => !value?.trim()).map(([label]) => label);
+  if (missingFields.length > 0) {
     throw new MitraRosterDataIncompleteError(
-      `Data ${profile.user.name} belum lengkap untuk dikembalikan ke roster. Lengkapi data mitra terlebih dahulu.`,
+      `Data ${profile.user.name} belum lengkap untuk dikembalikan ke roster. Lengkapi: ${missingFields.join(", ")}. Data lain yang berlabel opsional tidak perlu dilengkapi.`,
     );
   }
 

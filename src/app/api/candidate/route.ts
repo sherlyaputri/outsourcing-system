@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 
 class CandidateQuotaReachedError extends Error {}
 class VendorEmployeeUnavailableError extends Error {}
+class CandidateRequiredFieldsMissingError extends Error {}
 
 interface CandidatePayload {
   name: string;
@@ -369,12 +370,51 @@ export async function PATCH(req: NextRequest) {
           osRequestId: true,
           accountRequestId: true,
           vendorEmployeeId: true,
+          name: true,
+          nik: true,
+          fotoKtp: true,
+          jenisSim: true,
+          noSim: true,
+          fotoSim: true,
+          skck: true,
+          phone: true,
+          email: true,
+          alamat: true,
+          kelurahan: true,
+          kecamatan: true,
+          kabKota: true,
+          provinsi: true,
           osRequest: { select: { jumlah: true } },
         },
       });
       if (!candidate) return null;
 
       if (decision === "APPROVED") {
+        const requiredCandidateFields: [string, string | null][] = [
+          ["Nama Mitra", candidate.name],
+          ["NIK", candidate.nik],
+          ["Foto KTP", candidate.fotoKtp],
+          ["Jenis SIM", candidate.jenisSim],
+          ["Nomor SIM", candidate.noSim],
+          ["Foto SIM", candidate.fotoSim],
+          ["SKCK", candidate.skck],
+          ["No. HP", candidate.phone],
+          ["Email", candidate.email],
+          ["Alamat", candidate.alamat],
+          ["Kelurahan/Desa", candidate.kelurahan],
+          ["Kecamatan", candidate.kecamatan],
+          ["Kabupaten/Kota", candidate.kabKota],
+          ["Provinsi", candidate.provinsi],
+        ];
+        const missingFields = requiredCandidateFields
+          .filter(([, value]) => !value?.trim())
+          .map(([label]) => label);
+        if (missingFields.length > 0) {
+          throw new CandidateRequiredFieldsMissingError(
+            `Data wajib kandidat belum lengkap: ${missingFields.join(", ")}. Data lain yang opsional tidak perlu dilengkapi.`,
+          );
+        }
+
         const acceptedCount = await tx.candidate.count({
           where: {
             osRequestId: candidate.osRequestId,
@@ -484,6 +524,9 @@ export async function PATCH(req: NextRequest) {
     console.error("Candidate PATCH error:", error);
     if (error instanceof CandidateQuotaReachedError) {
       return NextResponse.json({ error: "Kuota kandidat diterima sudah terpenuhi sesuai jumlah Request OS." }, { status: 409 });
+    }
+    if (error instanceof CandidateRequiredFieldsMissingError) {
+      return NextResponse.json({ error: error.message }, { status: 409 });
     }
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2034") {
       return NextResponse.json({ error: "Seleksi kandidat sedang diproses bersamaan. Silakan coba kembali." }, { status: 409 });

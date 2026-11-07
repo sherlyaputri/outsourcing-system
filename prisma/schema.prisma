@@ -39,8 +39,10 @@ model Vendor {
   phone     String?
   email     String?
   status    String   @default("PENDING") // PENDING, ACTIVE, INACTIVE
+  removalReason String? @db.Text
+  removedAt DateTime?
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
 
   users         User[]
   mitraProfiles MitraProfile[]
@@ -265,6 +267,8 @@ model Invoice {
   catatan           String?   @db.Text
   dokumen           String?   @db.LongText
   dokumenNama       String?
+  buktiTransfer     String?   @db.LongText
+  buktiTransferNama String?
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 }

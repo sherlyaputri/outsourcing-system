@@ -26,6 +26,7 @@ export async function GET(req: NextRequest) {
         status: true,
         tanggalJatuhTempo: true,
         dokumenNama: true,
+        buktiTransferNama: true,
         createdAt: true,
         vendor: { select: { name: true } },
       },
@@ -35,6 +36,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(invoices.map((invoice) => ({
       ...invoice,
       hasDokumen: Boolean(invoice.dokumenNama),
+      hasBuktiTransfer: Boolean(invoice.buktiTransferNama),
     })));
   } catch (error) {
     console.error("Invoice GET error:", error);

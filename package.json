@@ -9,6 +9,7 @@
     "db:push": "prisma db push",
     "db:seed": "ts-node --project prisma/tsconfig.seed.json prisma/seed.ts",
     "db:backfill-mitra-shifts": "ts-node --project prisma/tsconfig.seed.json prisma/backfill-mitra-shifts.ts",
+    "db:backfill-mitra-skck": "ts-node --project prisma/tsconfig.seed.json prisma/backfill-mitra-skck.ts",
     "db:studio": "prisma studio"
   },
   "dependencies": {

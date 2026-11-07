@@ -83,7 +83,7 @@ export function getStatusLabel(status: string): string {
     DRAFT: 'Draft',
     SUBMITTED: 'Diajukan',
     VERIFIED: 'Diverifikasi',
-    PAID: 'Dibayar',
+    PAID: 'Sudah Dibayar',
     COMPLETED: 'Selesai',
     IN_PROGRESS: 'Sedang Proses',
     VENDOR_SELECTED: 'Vendor Dipilih',

@@ -117,6 +117,7 @@ export async function PUT(req: NextRequest) {
       noSim,
       fotoKtp,
       fotoSim,
+      skck,
       documents,
     } = body;
 
@@ -157,6 +158,21 @@ export async function PUT(req: NextRequest) {
       }
       uploadedImages[field] = value;
     }
+    let uploadedSkck: string | undefined;
+    if (skck !== undefined) {
+      if (typeof skck !== "string") {
+        return NextResponse.json({ error: "File SKCK tidak valid." }, { status: 400 });
+      }
+      const match = skck.match(/^data:(application\/pdf|image\/jpeg|image\/png);base64,([A-Za-z0-9+/]+=*)$/);
+      if (!match) {
+        return NextResponse.json({ error: "SKCK harus berupa PDF, JPG, atau PNG." }, { status: 400 });
+      }
+      const size = Buffer.from(match[2], "base64").length;
+      if (size === 0 || size > maxDocumentBytes) {
+        return NextResponse.json({ error: "Ukuran SKCK maksimal 5 MB." }, { status: 400 });
+      }
+      uploadedSkck = skck;
+    }
     if (documents !== undefined && (!Array.isArray(documents) || documents.length > 10)) {
       return NextResponse.json({ error: "Maksimal 10 dokumen per unggahan." }, { status: 400 });
     }
@@ -188,13 +204,16 @@ export async function PUT(req: NextRequest) {
 
     const mitra = await prisma.user.findFirst({
       where: { id: userId, vendorId: session.user.vendorId, role: "MITRA" },
-      include: { mitraProfile: { select: { id: true, waktuKerja: true } } },
+      include: { mitraProfile: { select: { id: true, waktuKerja: true, skck: true } } },
     });
     if (!mitra) {
       return NextResponse.json({ error: "Mitra tidak ditemukan." }, { status: 404 });
     }
     if (!mitra.mitraProfile && !waktuKerja) {
       return NextResponse.json({ error: "Jadwal shift wajib diisi untuk membuat profil Mitra." }, { status: 400 });
+    }
+    if (!mitra.mitraProfile?.skck && !uploadedSkck) {
+      return NextResponse.json({ error: "SKCK wajib diunggah untuk melengkapi data Mitra." }, { status: 400 });
     }
     const existingEmail = await prisma.user.findFirst({
       where: { email: email.trim().toLowerCase(), id: { not: userId } },
@@ -228,6 +247,7 @@ export async function PUT(req: NextRequest) {
         jenisSim: jenisSim?.trim() || null,
         noSim: noSim?.trim() || null,
         ...uploadedImages,
+        ...(uploadedSkck ? { skck: uploadedSkck } : {}),
       };
       const updatedProfile = await tx.mitraProfile.upsert({
         where: { userId },

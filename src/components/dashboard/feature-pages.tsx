@@ -23,6 +23,8 @@ interface Vendor {
   address?: string | null;
   phone?: string | null;
   email?: string | null;
+  removalReason?: string | null;
+  removedAt?: string | null;
   _count?: { users: number };
 }
 
@@ -80,6 +82,26 @@ interface OSCandidate {
   status: string;
   alasanKeputusan?: string | null;
   accountRequest?: { status: string } | null;
+}
+
+function getMissingCandidateFields(candidate: OSCandidate): string[] {
+  const requiredFields: [string, string | null | undefined][] = [
+    ["Nama Mitra", candidate.name],
+    ["NIK", candidate.nik],
+    ["Foto KTP", candidate.fotoKtp],
+    ["Jenis SIM", candidate.jenisSim],
+    ["Nomor SIM", candidate.noSim],
+    ["Foto SIM", candidate.fotoSim],
+    ["SKCK", candidate.skck],
+    ["No. HP", candidate.phone],
+    ["Email", candidate.email],
+    ["Alamat", candidate.alamat],
+    ["Kelurahan/Desa", candidate.kelurahan],
+    ["Kecamatan", candidate.kecamatan],
+    ["Kabupaten/Kota", candidate.kabKota],
+    ["Provinsi", candidate.provinsi],
+  ];
+  return requiredFields.filter(([, value]) => !value?.trim()).map(([label]) => label);
 }
 
 interface AccountRequest {
@@ -172,6 +194,8 @@ interface Invoice {
   status: string;
   hasDokumen: boolean;
   dokumenNama?: string | null;
+  hasBuktiTransfer: boolean;
+  buktiTransferNama?: string | null;
   tanggalJatuhTempo?: string | null;
   vendor?: { name: string };
 }
@@ -458,12 +482,12 @@ export function MitraManagementPage() {
                       </div>
                     </details>
                   )}
-                  {session?.user.role === "SM" && (
+                  {(session?.user.role === "SM" || session?.user.role === "VM") && (
                     <Button size="sm" variant="outline" onClick={() => setDetailMitra(mitra)}>
                       Lihat Detail
                     </Button>
                   )}
-                  {session?.user.role !== "VENDOR" && session?.user.role !== "SM" && "-"}
+                  {session?.user.role !== "VENDOR" && session?.user.role !== "SM" && session?.user.role !== "VM" && "-"}
                   {session?.user.role === "VENDOR" && (
                     <Button className="mt-2" size="sm" variant="outline" onClick={() => setEditingMitra(mitra)}>
                       Edit data
@@ -505,6 +529,7 @@ export function MitraManagementPage() {
               <p><span className="font-medium">SIM:</span> {[detailMitra.mitraProfile?.jenisSim, detailMitra.mitraProfile?.noSim].filter(Boolean).join(" · ") || "-"}</p>
               <p><span className="font-medium">Bank:</span> {detailMitra.mitraProfile?.namaBank || "-"}</p>
               <p><span className="font-medium">No. rekening:</span> {detailMitra.mitraProfile?.noRekening || "-"}</p>
+              <p><span className="font-medium">Jadwal shift:</span> {detailMitra.mitraProfile?.waktuKerja || "-"}</p>
               <p className="sm:col-span-2">
                 <span className="font-medium">Alamat:</span>{" "}
                 {[detailMitra.mitraProfile?.provinsi, detailMitra.mitraProfile?.kabKota, detailMitra.mitraProfile?.kecamatan, detailMitra.mitraProfile?.kelurahan, detailMitra.mitraProfile?.alamat]
@@ -524,6 +549,18 @@ export function MitraManagementPage() {
                     <div className="space-y-1 text-sm">
                       <p className="font-medium">Foto SIM</p>
                       <img className="h-36 max-w-full rounded border object-contain" src={detailMitra.mitraProfile.fotoSim} alt={`Foto SIM ${detailMitra.name}`} />
+                    </div>
+                  )}
+                  {detailMitra.mitraProfile.skck && (
+                    <div className="space-y-1 text-sm">
+                      <p className="font-medium">SKCK</p>
+                      {detailMitra.mitraProfile.skck.startsWith("data:image/") ? (
+                        <a href={detailMitra.mitraProfile.skck} target="_blank" rel="noreferrer">
+                          <img className="h-36 max-w-full rounded border object-contain" src={detailMitra.mitraProfile.skck} alt={`SKCK ${detailMitra.name}`} />
+                        </a>
+                      ) : (
+                        <a className="text-primary underline" href={detailMitra.mitraProfile.skck} target="_blank" rel="noreferrer">Lihat dokumen SKCK</a>
+                      )}
                     </div>
                   )}
                 </div>
@@ -587,6 +624,13 @@ function MitraEditDialog({
       })));
       const fotoKtp = form.get("fotoKtp");
       const fotoSim = form.get("fotoSim");
+      const skck = form.get("skck");
+      if (skck instanceof File && skck.size > 5 * 1024 * 1024) {
+        throw new Error("Ukuran SKCK maksimal 5 MB.");
+      }
+      if (skck instanceof File && skck.size > 0 && !["application/pdf", "image/jpeg", "image/png"].includes(skck.type)) {
+        throw new Error("SKCK harus berupa PDF, JPG, atau PNG.");
+      }
 
       await sendJson("/api/mitra", "PUT", {
         userId: mitra.id,
@@ -604,7 +648,10 @@ function MitraEditDialog({
         noBpjs: form.get("noBpjs"),
         noRekening: form.get("noRekening"),
         namaBank: form.get("namaBank"),
+        jenisSim: form.get("jenisSim"),
+        noSim: form.get("noSim"),
         documents,
+        ...(skck instanceof File && skck.size > 0 ? { skck: await readImage(skck) } : {}),
         ...(fotoKtp instanceof File && fotoKtp.size > 0 ? { fotoKtp: await readImage(fotoKtp) } : {}),
         ...(fotoSim instanceof File && fotoSim.size > 0 ? { fotoSim: await readImage(fotoSim) } : {}),
       });
@@ -691,6 +738,19 @@ function MitraEditDialog({
             <label className="space-y-1 text-sm md:col-span-2">Dokumen tambahan (PDF/JPG/PNG, maks. 5 MB per file)<OptionalMark />
               <input className={fieldClass} type="file" name="documents" multiple accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" />
             </label>
+            <label className="space-y-1 text-sm md:col-span-2">
+              SKCK (PDF/JPG/PNG, maks. 5 MB){mitra.mitraProfile?.skck ? <OptionalMark /> : <RequiredMark />}
+              <input
+                className={fieldClass}
+                type="file"
+                name="skck"
+                accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                required={!mitra.mitraProfile?.skck}
+              />
+              <span className="block text-xs text-muted-foreground">
+                {mitra.mitraProfile?.skck ? "SKCK sudah tersimpan. Pilih file jika ingin menggantinya." : "SKCK belum tersedia. Unggah dokumen SKCK asli untuk melengkapi data."}
+              </span>
+            </label>
             <label className="space-y-1 text-sm">Ganti foto KTP (JPG/PNG, maks. 5 MB)<OptionalMark />
               <input className={fieldClass} type="file" name="fotoKtp" accept="image/jpeg,image/png" />
             </label>
@@ -723,89 +783,6 @@ function MitraEditDialog({
         </form>
       </DialogContent>
     </Dialog>
-  );
-}
-
-function MitraIdPicker({
-  mitras,
-  value,
-  onChange,
-  label = "ID Mitra OS",
-  inputId = "idMitraOs",
-  excludedIds = [],
-}: {
-  mitras: Mitra[];
-  value: string;
-  onChange: (id: string) => void;
-  label?: string;
-  inputId?: string;
-  excludedIds?: string[];
-}) {
-  const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
-  const optionsId = `${inputId}-options`;
-  const selectedMitra = mitras.find((mitra) => mitra.mitraProfile?.idMitraOs === value);
-  const matches = query.trim()
-    ? mitras.filter((mitra) => mitra.status === "ACTIVE").filter((mitra) => {
-        if (excludedIds.includes(mitra.mitraProfile?.idMitraOs || "")) return false;
-        const code = mitra.mitraProfile?.idMitraOs || "";
-        const search = query.trim().toLocaleLowerCase();
-        return code.toLocaleLowerCase().includes(search) || mitra.name.toLocaleLowerCase().includes(search);
-      }).slice(0, 8)
-    : [];
-
-  return (
-    <div className="relative space-y-1 text-sm">
-      <label htmlFor={inputId} className="font-medium">{label}<RequiredMark /></label>
-      <input
-        id={inputId}
-        className={fieldClass}
-        value={selectedMitra ? `${selectedMitra.mitraProfile?.idMitraOs} - ${selectedMitra.name}` : query}
-        onChange={(event) => {
-          setQuery(event.target.value);
-          onChange("");
-          setOpen(true);
-        }}
-        onFocus={() => setOpen(true)}
-        onBlur={() => window.setTimeout(() => setOpen(false), 120)}
-        placeholder="Ketik ID atau nama mitra"
-        autoComplete="off"
-        role="combobox"
-        aria-expanded={open && matches.length > 0}
-        aria-controls={optionsId}
-        aria-autocomplete="list"
-        required
-      />
-      {open && matches.length > 0 && (
-        <ul id={optionsId} role="listbox" className="absolute z-20 max-h-56 w-full overflow-auto rounded-md border bg-white py-1 shadow-lg">
-          {matches.map((mitra) => (
-            <li key={mitra.id} role="option" aria-selected={mitra.mitraProfile?.idMitraOs === value}>
-              <button
-                type="button"
-                disabled={!mitra.mitraProfile?.idMitraOs}
-                className="w-full px-3 py-2 text-left hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => {
-                  const code = mitra.mitraProfile?.idMitraOs;
-                  if (code) {
-                    onChange(code);
-                    setQuery("");
-                    setOpen(false);
-                  }
-                }}
-              >
-                <span className="font-medium">{mitra.mitraProfile?.idMitraOs || "Belum ada ID Mitra OS"}</span>
-                <span className="text-muted-foreground"> — {mitra.name}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {selectedMitra && <input type="hidden" name="idMitraOs" value={value} />}
-      {open && query && matches.length === 0 && (
-        <p className="text-xs text-muted-foreground">Tidak ada mitra dengan ID atau nama tersebut.</p>
-      )}
-    </div>
   );
 }
 
@@ -1249,6 +1226,33 @@ export function VendorEmployeesPage() {
 
 export function VendorManagementPage() {
   const vendors = useApiData<Vendor[]>("/api/vendor", []);
+  const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  async function removeVendor(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedVendor || !reason.trim()) {
+      setError("Alasan remove wajib diisi.");
+      return;
+    }
+    setError(null);
+    setSaving(true);
+    try {
+      await sendJson("/api/vendor", "PATCH", {
+        vendorId: selectedVendor.id,
+        reason: reason.trim(),
+      });
+      setSelectedVendor(null);
+      setReason("");
+      vendors.reload();
+    } catch (removeError) {
+      setError(removeError instanceof Error ? removeError.message : "Gagal melakukan remove Vendor.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <FeaturePage
@@ -1257,9 +1261,10 @@ export function VendorManagementPage() {
       roles={["VM"]}
     >
       <Card><CardContent className="overflow-x-auto p-0">
+        <FormError error={error} />
         <LoadingError loading={vendors.loading} error={vendors.error} empty={!vendors.data.length} />
         {!vendors.loading && !vendors.error && vendors.data.length > 0 && (
-          <DataTable headers={["Nama Vendor", "Email", "Telepon", "Jumlah Mitra OS", "Status"]}>
+          <DataTable headers={["Nama Vendor", "Email", "Telepon", "Jumlah Mitra OS", "Status", "Alasan Remove", "Aksi"]}>
             {vendors.data.map((vendor) => (
               <TableRow key={vendor.id}>
                 <TableCell className="font-medium">{vendor.name}</TableCell>
@@ -1267,11 +1272,61 @@ export function VendorManagementPage() {
                 <TableCell>{vendor.phone || "-"}</TableCell>
                 <TableCell>{vendor._count?.users || 0}</TableCell>
                 <TableCell><StatusBadge status={vendor.status} /></TableCell>
+                <TableCell className="max-w-64 whitespace-normal">{vendor.removalReason || "-"}</TableCell>
+                <TableCell>
+                  {vendor.status === "ACTIVE" ? (
+                    <Button size="sm" variant="outline" onClick={() => {
+                      setError(null);
+                      setSelectedVendor(vendor);
+                    }}>
+                      Tandai Tidak Digunakan
+                    </Button>
+                  ) : vendor.removedAt ? new Date(vendor.removedAt).toLocaleDateString("id-ID") : "-"}
+                </TableCell>
               </TableRow>
             ))}
           </DataTable>
         )}
       </CardContent></Card>
+      {selectedVendor && (
+        <Dialog open onOpenChange={(open) => {
+          if (!open && !saving) {
+            setSelectedVendor(null);
+            setReason("");
+          }
+        }}>
+          <DialogHeader><DialogTitle>Nonaktifkan Vendor — {selectedVendor.name}</DialogTitle></DialogHeader>
+          <DialogContent>
+            <form onSubmit={removeVendor} className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Ini hanya menandai Vendor tidak digunakan: data Vendor, invoice, dan riwayat tidak dihapus.
+                Akun Vendor dan Mitra di bawahnya dinonaktifkan. Vendor dengan Request OS yang masih berjalan
+                belum dapat dinonaktifkan.
+              </p>
+              <label className="block space-y-1 text-sm">
+                Alasan remove<RequiredMark />
+                <textarea
+                  className={fieldClass}
+                  rows={4}
+                  maxLength={2000}
+                  value={reason}
+                  onChange={(event) => setReason(event.target.value)}
+                  required
+                />
+              </label>
+              <FormError error={error} />
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" disabled={saving} onClick={() => {
+                  setSelectedVendor(null);
+                  setReason("");
+                  setError(null);
+                }}>Batal</Button>
+                <Button type="submit" disabled={saving}>{saving ? "Memproses..." : "Nonaktifkan Vendor"}</Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
     </FeaturePage>
   );
 }
@@ -1691,6 +1746,7 @@ export function InvoicesPage() {
   const invoices = useApiData<Invoice[]>("/api/invoice", []);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [uploadingInvoiceId, setUploadingInvoiceId] = useState<string | null>(null);
 
   async function readInvoiceDocument(file: File) {
     return new Promise<string>((resolve, reject) => {
@@ -1702,6 +1758,28 @@ export function InvoicesPage() {
       reader.onerror = () => reject(new Error("File invoice gagal dibaca."));
       reader.readAsDataURL(file);
     });
+  }
+
+  async function uploadPaymentProof(invoiceId: string, file: File) {
+    setError(null);
+    setUploadingInvoiceId(invoiceId);
+    try {
+      if (!["application/pdf", "image/jpeg", "image/png"].includes(file.type)) {
+        throw new Error("Bukti transfer harus berupa PDF, JPG, atau PNG.");
+      }
+      if (file.size === 0 || file.size > 5 * 1024 * 1024) {
+        throw new Error("Ukuran bukti transfer maksimal 5 MB.");
+      }
+      await sendJson(`/api/invoice/${invoiceId}`, "PATCH", {
+        buktiTransfer: await readInvoiceDocument(file),
+        buktiTransferNama: file.name,
+      });
+      invoices.reload();
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Gagal mengunggah bukti transfer.");
+    } finally {
+      setUploadingInvoiceId(null);
+    }
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -1741,6 +1819,7 @@ export function InvoicesPage() {
 
   return (
     <FeaturePage title="Invoice" description="Lihat invoice vendor atau kirim invoice baru." roles={["VENDOR", "VM"]}>
+      <FormError error={error} />
       {session?.user.role === "VENDOR" && (
         <Card><CardHeader><CardTitle className="text-lg">Buat Invoice</CardTitle></CardHeader><CardContent>
           <form onSubmit={submit} className="grid gap-4 md:grid-cols-2">
@@ -1757,8 +1836,40 @@ export function InvoicesPage() {
       <Card><CardContent className="p-0">
         <LoadingError loading={invoices.loading} error={invoices.error} empty={!invoices.data.length} />
         {!invoices.loading && !invoices.error && invoices.data.length > 0 && (
-          <DataTable headers={["Nomor", "Bulan", "Vendor", "Total", "Jatuh Tempo", "Dokumen", "Status"]}>
-            {invoices.data.map((item) => <TableRow key={item.id}><TableCell>{item.nomorInvoice}</TableCell><TableCell>{item.bulan}</TableCell><TableCell>{item.vendor?.name || "-"}</TableCell><TableCell>{item.totalAmount.toLocaleString("id-ID")}</TableCell><TableCell>{item.tanggalJatuhTempo ? new Date(item.tanggalJatuhTempo).toLocaleDateString("id-ID") : "-"}</TableCell><TableCell>{item.hasDokumen ? <a className="text-primary underline" href={`/api/invoice/${item.id}`} target="_blank" rel="noreferrer">{item.dokumenNama || "Unduh"}</a> : "-"}</TableCell><TableCell><StatusBadge status={item.status} /></TableCell></TableRow>)}
+          <DataTable headers={["Nomor", "Bulan", "Vendor", "Total", "Jatuh Tempo", "Dokumen", "Bukti Transfer", "Status"]}>
+            {invoices.data.map((item) => (
+              <TableRow key={item.id}>
+                <TableCell>{item.nomorInvoice}</TableCell>
+                <TableCell>{item.bulan}</TableCell>
+                <TableCell>{item.vendor?.name || "-"}</TableCell>
+                <TableCell>{item.totalAmount.toLocaleString("id-ID")}</TableCell>
+                <TableCell>{item.tanggalJatuhTempo ? new Date(item.tanggalJatuhTempo).toLocaleDateString("id-ID") : "-"}</TableCell>
+                <TableCell>{item.hasDokumen ? <a className="text-primary underline" href={`/api/invoice/${item.id}`} target="_blank" rel="noreferrer">{item.dokumenNama || "Unduh"}</a> : "-"}</TableCell>
+                <TableCell className="min-w-52">
+                  {item.hasBuktiTransfer ? (
+                    <a className="text-primary underline" href={`/api/invoice/${item.id}?type=transfer`} target="_blank" rel="noreferrer">
+                      {item.buktiTransferNama || "Lihat bukti"}
+                    </a>
+                  ) : session?.user.role === "VM" ? (
+                    <label className="block space-y-1 text-xs">
+                      {uploadingInvoiceId === item.id ? "Mengunggah..." : "Upload bukti transfer"}
+                      <input
+                        className="block w-full text-xs"
+                        type="file"
+                        accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                        disabled={Boolean(uploadingInvoiceId) || item.status === "PAID"}
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) void uploadPaymentProof(item.id, file);
+                          event.target.value = "";
+                        }}
+                      />
+                    </label>
+                  ) : "-"}
+                </TableCell>
+                <TableCell><StatusBadge status={item.status} /></TableCell>
+              </TableRow>
+            ))}
           </DataTable>
         )}
       </CardContent></Card>
@@ -1775,6 +1886,7 @@ export function OSRequestPage() {
   const [saving, setSaving] = useState(false);
   const [requestType, setRequestType] = useState("PENAMBAHAN");
   const [selectedMitraIds, setSelectedMitraIds] = useState<string[]>([""]);
+  const [selectedMitraOffice, setSelectedMitraOffice] = useState("");
   const [requestQuantity, setRequestQuantity] = useState(1);
   const [requestPosition, setRequestPosition] = useState("");
   const [requestPlacement, setRequestPlacement] = useState("");
@@ -1913,6 +2025,7 @@ export function OSRequestPage() {
       formElement.reset();
       setRequestType("PENAMBAHAN");
       setSelectedMitraIds([""]);
+      setSelectedMitraOffice("");
       setRequestQuantity(1);
       setRequestPosition("");
       setRequestPlacement("");
@@ -2064,6 +2177,7 @@ export function OSRequestPage() {
                 onChange={(event) => {
                   setRequestType(event.target.value);
                   setSelectedMitraIds([""]);
+                  setSelectedMitraOffice("");
                   setRequestQuantity(1);
                   setRequestPosition("");
                   setRequestPlacement("");
@@ -2090,18 +2204,59 @@ export function OSRequestPage() {
             </label>
             {needsMitraId ? (
               <div className="space-y-4 md:col-span-2">
+                <label className="block max-w-md space-y-1 text-sm">
+                  Kode Kantor<RequiredMark />
+                  <select
+                    className={fieldClass}
+                    value={selectedMitraOffice}
+                    onChange={(event) => {
+                      setSelectedMitraOffice(event.target.value);
+                      setSelectedMitraIds(Array.from({ length: requestQuantity }, () => ""));
+                      setRequestPosition("");
+                      setRequestPlacement(event.target.value);
+                      setRequestWorkHours("");
+                    }}
+                    required
+                  >
+                    <option value="">Pilih kode kantor</option>
+                    {["kantor1", "kantor2", "kantor3"].map((office) => (
+                      <option key={office} value={office}>{office}</option>
+                    ))}
+                  </select>
+                </label>
                 {selectedMitraIds.map((id, index) => {
                   const selected = mitras.data.find((mitra) => mitra.mitraProfile?.idMitraOs === id);
                   return (
                     <div key={index} className="grid gap-3 rounded-md border p-3 md:grid-cols-2">
-                      <MitraIdPicker
-                        mitras={mitras.data}
-                        value={id}
-                        label={`Mitra OS ${index + 1}`}
-                        inputId={`idMitraOs-${index}`}
-                        excludedIds={selectedMitraIds.filter((_, selectedIndex) => selectedIndex !== index)}
-                        onChange={(nextId) => updateMitraTarget(index, nextId)}
-                      />
+                      <label className="space-y-1 text-sm">
+                        Nama Mitra OS {index + 1}<RequiredMark />
+                        <select
+                          id={`mitraOs-${index}`}
+                          className={fieldClass}
+                          value={id}
+                          disabled={!selectedMitraOffice || mitras.loading}
+                          onChange={(event) => updateMitraTarget(index, event.target.value)}
+                          required
+                        >
+                          <option value="">
+                            {!selectedMitraOffice
+                              ? "Pilih kode kantor terlebih dahulu"
+                              : mitras.loading ? "Memuat data Mitra OS..." : "Pilih nama Mitra OS"}
+                          </option>
+                          {mitras.data
+                            .filter((mitra) => mitra.status === "ACTIVE")
+                            .filter((mitra) => mitra.mitraProfile?.penempatan === selectedMitraOffice)
+                            .filter((mitra) => !selectedMitraIds.some(
+                              (selectedId, selectedIndex) => selectedIndex !== index
+                                && selectedId === mitra.mitraProfile?.idMitraOs,
+                            ))
+                            .map((mitra) => (
+                              <option key={mitra.id} value={mitra.mitraProfile?.idMitraOs || ""}>
+                                {mitra.name} — {mitra.mitraProfile?.idMitraOs}
+                              </option>
+                            ))}
+                        </select>
+                      </label>
                       <div className="rounded-md bg-muted p-3 text-sm">
                         {selected ? (
                           <>
@@ -2133,7 +2288,7 @@ export function OSRequestPage() {
             </label>
             <label className="space-y-1 text-sm">
               Wilayah Operasional<RequiredMark />
-              <select className={fieldClass} name="penempatan" required value={requestPlacement} onChange={(event) => setRequestPlacement(event.target.value)}>
+              <select className={fieldClass} name="penempatan" required value={needsMitraId ? selectedMitraOffice : requestPlacement} disabled={needsMitraId} onChange={(event) => setRequestPlacement(event.target.value)}>
                 <option value="" disabled>Pilih wilayah</option>
                 <option value="kantor1">kantor1</option>
                 <option value="kantor2">kantor2</option>
@@ -2210,7 +2365,9 @@ export function OSRequestPage() {
             </p>
           </DialogHeader>
           <DialogContent className="space-y-4">
-            {activeReviewRequest?.candidates?.map((candidate) => (
+            {activeReviewRequest?.candidates?.map((candidate) => {
+              const missingFields = getMissingCandidateFields(candidate);
+              return (
               <div key={candidate.id} className="rounded-lg border p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="space-y-1">
@@ -2225,12 +2382,17 @@ export function OSRequestPage() {
                       Alamat: {[candidate.provinsi, candidate.kabKota, candidate.kecamatan, candidate.kelurahan, candidate.alamat]
                         .filter(Boolean).join(", ") || "-"}
                     </p>
+                    {missingFields.length > 0 && (
+                      <p className="text-sm font-medium text-red-600">
+                        Data wajib belum lengkap: {missingFields.join(", ")}. Data lain yang opsional tidak perlu dilengkapi.
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-2">
                     {candidate.status === "KANDIDAT" ? (
                       <>
                         <Button
-                          disabled={candidateActionId === candidate.id || !hasSelectionCapacity}
+                          disabled={candidateActionId === candidate.id || !hasSelectionCapacity || missingFields.length > 0}
                           onClick={() => startCandidateDecision(candidate.id, "APPROVED")}
                         >
                           Terima
@@ -2275,7 +2437,8 @@ export function OSRequestPage() {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </DialogContent>
         </Dialog>
       )}
