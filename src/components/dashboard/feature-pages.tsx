@@ -47,6 +47,13 @@ interface Mitra {
     kecamatan?: string | null;
     kabKota?: string | null;
     provinsi?: string | null;
+    domisiliSesuaiKtp?: boolean;
+    domisiliAlamat?: string | null;
+    domisiliKelurahan?: string | null;
+    domisiliKecamatan?: string | null;
+    domisiliKabKota?: string | null;
+    domisiliProvinsi?: string | null;
+    dokumenDeadlineAt?: string | null;
     fotoKtp?: string | null;
     jenisSim?: string | null;
     noSim?: string | null;
@@ -79,6 +86,14 @@ interface OSCandidate {
   kecamatan?: string | null;
   kabKota?: string | null;
   provinsi?: string | null;
+  discType?: string | null;
+  discReport?: string | null;
+  domisiliSesuaiKtp?: boolean;
+  domisiliAlamat?: string | null;
+  domisiliKelurahan?: string | null;
+  domisiliKecamatan?: string | null;
+  domisiliKabKota?: string | null;
+  domisiliProvinsi?: string | null;
   status: string;
   alasanKeputusan?: string | null;
   accountRequest?: { status: string } | null;
@@ -145,6 +160,14 @@ interface CandidateDraft {
   kecamatan: string;
   kabKota: string;
   provinsi: string;
+  domisiliSesuaiKtp: string;
+  domisiliAlamat: string;
+  domisiliKelurahan: string;
+  domisiliKecamatan: string;
+  domisiliKabKota: string;
+  domisiliProvinsi: string;
+  discType: string;
+  discReport: File | null;
 }
 
 interface VendorEmployee {
@@ -161,6 +184,12 @@ interface VendorEmployee {
   kecamatan: string;
   kabKota: string;
   provinsi: string;
+  domisiliSesuaiKtp: boolean;
+  domisiliAlamat?: string | null;
+  domisiliKelurahan?: string | null;
+  domisiliKecamatan?: string | null;
+  domisiliKabKota?: string | null;
+  domisiliProvinsi?: string | null;
   hasSkck: boolean;
 }
 
@@ -213,6 +242,8 @@ interface OSRequest {
   waktuKerja?: string | null;
   alasan?: string | null;
   vendorId?: string | null;
+  vendorNotifiedAt?: string | null;
+  createdAt?: string;
   requester?: { name: string; role: string };
   vendor?: { name: string } | null;
   candidates?: OSCandidate[];
@@ -430,6 +461,7 @@ export function MitraManagementPage() {
           <DataTable headers={[
             "ID Mitra OS", "Nama", "Email", "Vendor", "Posisi", "Penempatan", "Shift",
             ...(session?.user.role === "VENDOR" || session?.user.role === "VM" ? ["Kredensial Awal"] : []),
+            ...(session?.user.role === "VENDOR" || session?.user.role === "VM" ? ["Dokumen Tambahan"] : []),
             "Detail Data", "Status",
           ]}>
             {mitras.data.map((mitra) => (
@@ -442,6 +474,21 @@ export function MitraManagementPage() {
                 <TableCell>{mitra.mitraProfile?.posisi || "-"}</TableCell>
                 <TableCell>{mitra.mitraProfile?.penempatan || "-"}</TableCell>
                 <TableCell>{mitra.mitraProfile?.waktuKerja || "Belum diatur"}</TableCell>
+                {(session?.user.role === "VENDOR" || session?.user.role === "VM") && (
+                  <TableCell>
+                    {mitra.mitraProfile?.dokumenDeadlineAt ? (() => {
+                      const requiredDocuments = ["Ijazah", "Kartu Keluarga", "Foto Seluruh Badan", "SKBN"];
+                      const uploadedNames = new Set(mitra.mitraProfile.documents?.map((document) => document.name) || []);
+                      const missingCount = requiredDocuments.filter((name) => !uploadedNames.has(name)).length;
+                      return (
+                        <div className="min-w-36 text-xs">
+                          <p>Tenggat: {new Date(mitra.mitraProfile.dokumenDeadlineAt).toLocaleDateString("id-ID")}</p>
+                          <p>{missingCount === 0 ? "Dokumen lengkap" : `${missingCount} dokumen belum lengkap`}</p>
+                        </div>
+                      );
+                    })() : "-"}
+                  </TableCell>
+                )}
                 {(session?.user.role === "VENDOR" || session?.user.role === "VM") && (
                   <TableCell>
                     {mitra.initialPassword ? (
@@ -531,9 +578,15 @@ export function MitraManagementPage() {
               <p><span className="font-medium">No. rekening:</span> {detailMitra.mitraProfile?.noRekening || "-"}</p>
               <p><span className="font-medium">Jadwal shift:</span> {detailMitra.mitraProfile?.waktuKerja || "-"}</p>
               <p className="sm:col-span-2">
-                <span className="font-medium">Alamat:</span>{" "}
+                <span className="font-medium">Alamat sesuai KTP:</span>{" "}
                 {[detailMitra.mitraProfile?.provinsi, detailMitra.mitraProfile?.kabKota, detailMitra.mitraProfile?.kecamatan, detailMitra.mitraProfile?.kelurahan, detailMitra.mitraProfile?.alamat]
                   .filter(Boolean).join(", ") || "-"}
+              </p>
+              <p className="sm:col-span-2">
+                <span className="font-medium">Alamat domisili:</span>{" "}
+                {detailMitra.mitraProfile?.domisiliSesuaiKtp === false
+                  ? [detailMitra.mitraProfile?.domisiliProvinsi, detailMitra.mitraProfile?.domisiliKabKota, detailMitra.mitraProfile?.domisiliKecamatan, detailMitra.mitraProfile?.domisiliKelurahan, detailMitra.mitraProfile?.domisiliAlamat].filter(Boolean).join(", ")
+                  : "Sesuai dengan KTP"}
               </p>
             </div>
             {detailMitra.mitraProfile && (
@@ -601,6 +654,19 @@ function MitraEditDialog({
 }) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [address, setAddress] = useState({
+    provinsi: mitra.mitraProfile?.provinsi || "",
+    kabKota: mitra.mitraProfile?.kabKota || "",
+    kecamatan: mitra.mitraProfile?.kecamatan || "",
+    kelurahan: mitra.mitraProfile?.kelurahan || "",
+  });
+  const [domicileSameAsKtp, setDomicileSameAsKtp] = useState(mitra.mitraProfile?.domisiliSesuaiKtp !== false);
+  const [domicileAddress, setDomicileAddress] = useState({
+    provinsi: mitra.mitraProfile?.domisiliProvinsi || "",
+    kabKota: mitra.mitraProfile?.domisiliKabKota || "",
+    kecamatan: mitra.mitraProfile?.domisiliKecamatan || "",
+    kelurahan: mitra.mitraProfile?.domisiliKelurahan || "",
+  });
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -609,6 +675,16 @@ function MitraEditDialog({
     const form = new FormData(event.currentTarget);
     try {
       const files = form.getAll("documents").filter((file): file is File => file instanceof File && file.size > 0);
+      const additionalDocuments = [
+        ["ijazah", "Ijazah"],
+        ["kartuKeluarga", "Kartu Keluarga"],
+        ["fotoSeluruhBadan", "Foto Seluruh Badan"],
+        ["skbn", "SKBN"],
+      ].flatMap(([field, name]) => {
+        const file = form.get(field);
+        return file instanceof File && file.size > 0 ? [{ file, name }] : [];
+      });
+      files.push(...additionalDocuments.map(({ file }) => file));
       for (const file of files) {
         if (!["application/pdf", "image/jpeg", "image/png"].includes(file.type)) {
           throw new Error("Dokumen harus berupa PDF, JPG, atau PNG.");
@@ -619,7 +695,7 @@ function MitraEditDialog({
       }
 
       const documents = await Promise.all(files.map(async (file) => ({
-        name: file.name,
+        name: additionalDocuments.find((item) => item.file === file)?.name || file.name,
         content: await readImage(file),
       })));
       const fotoKtp = form.get("fotoKtp");
@@ -641,10 +717,13 @@ function MitraEditDialog({
         tempatLahir: form.get("tempatLahir"),
         tanggalLahir: form.get("tanggalLahir"),
         alamat: form.get("alamat"),
-        kelurahan: form.get("kelurahan"),
-        kecamatan: form.get("kecamatan"),
-        kabKota: form.get("kabKota"),
-        provinsi: form.get("provinsi"),
+        ...address,
+        domisiliSesuaiKtp: domicileSameAsKtp,
+        domisiliAlamat: domicileSameAsKtp ? "" : form.get("domisiliAlamat"),
+        domisiliKelurahan: domicileSameAsKtp ? "" : domicileAddress.kelurahan,
+        domisiliKecamatan: domicileSameAsKtp ? "" : domicileAddress.kecamatan,
+        domisiliKabKota: domicileSameAsKtp ? "" : domicileAddress.kabKota,
+        domisiliProvinsi: domicileSameAsKtp ? "" : domicileAddress.provinsi,
         noBpjs: form.get("noBpjs"),
         noRekening: form.get("noRekening"),
         namaBank: form.get("namaBank"),
@@ -720,24 +799,60 @@ function MitraEditDialog({
             <label className="space-y-1 text-sm">Nomor SIM<OptionalMark />
               <input className={fieldClass} name="noSim" defaultValue={mitra.mitraProfile?.noSim || ""} />
             </label>
-            <label className="space-y-1 text-sm">Provinsi<OptionalMark />
-              <input className={fieldClass} name="provinsi" defaultValue={mitra.mitraProfile?.provinsi || ""} />
-            </label>
-            <label className="space-y-1 text-sm">Kabupaten/Kota<OptionalMark />
-              <input className={fieldClass} name="kabKota" defaultValue={mitra.mitraProfile?.kabKota || ""} />
-            </label>
-            <label className="space-y-1 text-sm">Kecamatan<OptionalMark />
-              <input className={fieldClass} name="kecamatan" defaultValue={mitra.mitraProfile?.kecamatan || ""} />
-            </label>
-            <label className="space-y-1 text-sm">Kelurahan/Desa<OptionalMark />
-              <input className={fieldClass} name="kelurahan" defaultValue={mitra.mitraProfile?.kelurahan || ""} />
-            </label>
-            <label className="space-y-1 text-sm md:col-span-2">Alamat tempat tinggal<OptionalMark />
+            <p className="text-sm font-medium md:col-span-2">Alamat sesuai KTP</p>
+            <RegionPicker value={address} required={false} onChange={(field, value) => {
+              if (field === "provinsi" || field === "kabKota" || field === "kecamatan" || field === "kelurahan") {
+                setAddress((current) => ({ ...current, [field]: value }));
+              }
+            }} />
+            <label className="space-y-1 text-sm md:col-span-2">Alamat sesuai KTP<OptionalMark />
               <textarea className={fieldClass} name="alamat" rows={2} defaultValue={mitra.mitraProfile?.alamat || ""} />
             </label>
+            <label className="space-y-1 text-sm md:col-span-2">Alamat domisili
+              <select className={fieldClass} value={domicileSameAsKtp ? "SAMA" : "BERBEDA"} onChange={(event) => setDomicileSameAsKtp(event.target.value === "SAMA")}>
+                <option value="SAMA">Sesuai dengan KTP</option>
+                <option value="BERBEDA">Berbeda dengan KTP</option>
+              </select>
+            </label>
+            {!domicileSameAsKtp && (
+              <>
+                <RegionPicker value={domicileAddress} onChange={(field, value) => {
+                  if (field === "provinsi" || field === "kabKota" || field === "kecamatan" || field === "kelurahan") {
+                    setDomicileAddress((current) => ({ ...current, [field]: value }));
+                  }
+                }} />
+                <label className="space-y-1 text-sm md:col-span-2">Alamat domisili<RequiredMark />
+                  <textarea className={fieldClass} name="domisiliAlamat" rows={2} defaultValue={mitra.mitraProfile?.domisiliAlamat || ""} required />
+                </label>
+              </>
+            )}
             <label className="space-y-1 text-sm md:col-span-2">Dokumen tambahan (PDF/JPG/PNG, maks. 5 MB per file)<OptionalMark />
               <input className={fieldClass} type="file" name="documents" multiple accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" />
             </label>
+            <div className="space-y-3 rounded-md border p-3 text-sm md:col-span-2">
+              <div>
+                <p className="font-medium">Dokumen tambahan Mitra OS</p>
+                <p className="text-muted-foreground">
+                  Lengkapi ijazah, KK, foto seluruh badan, dan SKBN dalam 14 hari setelah akun Mitra OS diaktifkan.
+                  {mitra.mitraProfile?.dokumenDeadlineAt && ` Tenggat: ${new Date(mitra.mitraProfile.dokumenDeadlineAt).toLocaleDateString("id-ID")}.`}
+                </p>
+              </div>
+              {[
+                ["ijazah", "Ijazah"],
+                ["kartuKeluarga", "Kartu Keluarga"],
+                ["fotoSeluruhBadan", "Foto Seluruh Badan"],
+                ["skbn", "SKBN"],
+              ].map(([field, name]) => {
+                const uploaded = mitra.mitraProfile?.documents?.some((document) => document.name === name);
+                return (
+                  <label key={field} className="block space-y-1">
+                    {name}<OptionalMark />
+                    <input className={fieldClass} type="file" name={field} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" />
+                    <span className="text-xs text-muted-foreground">{uploaded ? "Sudah diunggah; pilih file untuk mengganti." : "Belum diunggah."}</span>
+                  </label>
+                );
+              })}
+            </div>
             <label className="space-y-1 text-sm md:col-span-2">
               SKCK (PDF/JPG/PNG, maks. 5 MB){mitra.mitraProfile?.skck ? <OptionalMark /> : <RequiredMark />}
               <input
@@ -802,6 +917,14 @@ function emptyCandidate(): CandidateDraft {
     kecamatan: "",
     kabKota: "",
     provinsi: "",
+    domisiliSesuaiKtp: "SAMA",
+    domisiliAlamat: "",
+    domisiliKelurahan: "",
+    domisiliKecamatan: "",
+    domisiliKabKota: "",
+    domisiliProvinsi: "",
+    discType: "",
+    discReport: null,
   };
 }
 
@@ -820,9 +943,11 @@ function readImage(file: File): Promise<string> {
 function RegionPicker({
   value,
   onChange,
+  required = true,
 }: {
   value: Pick<CandidateDraft, "provinsi" | "kabKota" | "kecamatan" | "kelurahan">;
   onChange: (field: keyof CandidateDraft, regionName: string) => void;
+  required?: boolean;
 }) {
   const [provinces, setProvinces] = useState<Region[]>([]);
   const [regencies, setRegencies] = useState<Region[]>([]);
@@ -850,6 +975,12 @@ function RegionPicker({
   }, []);
 
   useEffect(() => {
+    if (!provinceId && provinces.length > 0 && value.provinsi) {
+      setProvinceId(provinces.find((region) => region.name === value.provinsi)?.id || "");
+    }
+  }, [provinceId, provinces, value.provinsi]);
+
+  useEffect(() => {
     if (!provinceId) {
       setRegencies([]);
       return;
@@ -869,6 +1000,12 @@ function RegionPicker({
   }, [provinceId]);
 
   useEffect(() => {
+    if (!regencyId && regencies.length > 0 && value.kabKota) {
+      setRegencyId(regencies.find((region) => region.name === value.kabKota)?.id || "");
+    }
+  }, [regencyId, regencies, value.kabKota]);
+
+  useEffect(() => {
     if (!regencyId) {
       setDistricts([]);
       return;
@@ -886,6 +1023,12 @@ function RegionPicker({
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [regencyId]);
+
+  useEffect(() => {
+    if (!districtId && districts.length > 0 && value.kecamatan) {
+      setDistrictId(districts.find((region) => region.name === value.kecamatan)?.id || "");
+    }
+  }, [districtId, districts, value.kecamatan]);
 
   useEffect(() => {
     if (!districtId) {
@@ -908,10 +1051,10 @@ function RegionPicker({
 
   return (
     <div className="space-y-4 md:col-span-2">
-      <label className="block space-y-1 text-sm">Provinsi<RequiredMark />
+      <label className="block space-y-1 text-sm">Provinsi{required ? <RequiredMark /> : <OptionalMark />}
         <select
           className={fieldClass}
-          required
+          required={required}
           disabled={loading && provinces.length === 0}
           value={provinceId}
           onChange={(event) => {
@@ -929,11 +1072,11 @@ function RegionPicker({
           {provinces.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}
         </select>
       </label>
-      <label className="block space-y-1 text-sm">Kabupaten/Kota<RequiredMark />
+      <label className="block space-y-1 text-sm">Kabupaten/Kota{required ? <RequiredMark /> : <OptionalMark />}
         <select
           className={fieldClass}
           value={regencyId}
-          required
+          required={required}
           disabled={!provinceId || loading}
           onChange={(event) => {
             const selected = regencies.find((region) => region.id === event.target.value);
@@ -948,11 +1091,11 @@ function RegionPicker({
           {regencies.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}
         </select>
       </label>
-      <label className="block space-y-1 text-sm">Kecamatan<RequiredMark />
+      <label className="block space-y-1 text-sm">Kecamatan{required ? <RequiredMark /> : <OptionalMark />}
         <select
           className={fieldClass}
           value={districtId}
-          required
+          required={required}
           disabled={!regencyId || loading}
           onChange={(event) => {
             const selected = districts.find((region) => region.id === event.target.value);
@@ -965,10 +1108,10 @@ function RegionPicker({
           {districts.map((region) => <option key={region.id} value={region.id}>{region.name}</option>)}
         </select>
       </label>
-      <label className="block space-y-1 text-sm">Kelurahan/Desa<RequiredMark />
+      <label className="block space-y-1 text-sm">Kelurahan/Desa{required ? <RequiredMark /> : <OptionalMark />}
         <select
           className={fieldClass}
-          required
+          required={required}
           disabled={!districtId || loading}
           value={villages.find((region) => region.name === value.kelurahan)?.id || ""}
           onChange={(event) => {
@@ -990,10 +1133,12 @@ function CandidateFields({
   candidate,
   index,
   update,
+  includeDisc = false,
 }: {
   candidate: CandidateDraft;
   index: number;
   update: (index: number, field: keyof CandidateDraft, value: string | File | null) => void;
+  includeDisc?: boolean;
 }) {
   return (
     <fieldset className="grid gap-4 rounded-md border p-4 md:grid-cols-2">
@@ -1028,6 +1173,7 @@ function CandidateFields({
       <label className="space-y-1 text-sm">Email (format: nama@domain.com)<RequiredMark />
         <input className={fieldClass} type="email" placeholder="nama@domain.com" value={candidate.email} onChange={(event) => update(index, "email", event.target.value)} required />
       </label>
+      <p className="text-sm font-medium md:col-span-2">Alamat sesuai KTP</p>
       <RegionPicker
         value={{
           provinsi: candidate.provinsi,
@@ -1037,9 +1183,56 @@ function CandidateFields({
         }}
         onChange={(field, value) => update(index, field, value)}
       />
-      <label className="space-y-1 text-sm md:col-span-2">Alamat tempat tinggal<RequiredMark />
+      <label className="space-y-1 text-sm md:col-span-2">Alamat sesuai KTP<RequiredMark />
         <input className={fieldClass} value={candidate.alamat} onChange={(event) => update(index, "alamat", event.target.value)} required />
       </label>
+      <fieldset className="space-y-3 md:col-span-2">
+        <legend className="text-sm font-medium">Alamat domisili</legend>
+        <div className="flex flex-wrap gap-4 text-sm">
+          <label className="flex items-center gap-2">
+            <input type="radio" name={`domisili-${index}`} value="SAMA" checked={candidate.domisiliSesuaiKtp === "SAMA"} onChange={() => update(index, "domisiliSesuaiKtp", "SAMA")} />
+            Sesuai dengan KTP
+          </label>
+          <label className="flex items-center gap-2">
+            <input type="radio" name={`domisili-${index}`} value="BERBEDA" checked={candidate.domisiliSesuaiKtp === "BERBEDA"} onChange={() => update(index, "domisiliSesuaiKtp", "BERBEDA")} />
+            Berbeda dengan KTP
+          </label>
+        </div>
+        {candidate.domisiliSesuaiKtp === "BERBEDA" && (
+          <>
+            <RegionPicker
+              value={{
+                provinsi: candidate.domisiliProvinsi,
+                kabKota: candidate.domisiliKabKota,
+                kecamatan: candidate.domisiliKecamatan,
+                kelurahan: candidate.domisiliKelurahan,
+              }}
+              onChange={(field, value) => {
+                if (field === "provinsi") update(index, "domisiliProvinsi", value);
+                if (field === "kabKota") update(index, "domisiliKabKota", value);
+                if (field === "kecamatan") update(index, "domisiliKecamatan", value);
+                if (field === "kelurahan") update(index, "domisiliKelurahan", value);
+              }}
+            />
+            <label className="block space-y-1 text-sm">Alamat domisili<RequiredMark />
+              <input className={fieldClass} value={candidate.domisiliAlamat} onChange={(event) => update(index, "domisiliAlamat", event.target.value)} required />
+            </label>
+          </>
+        )}
+      </fieldset>
+      {includeDisc && (
+        <>
+          <label className="space-y-1 text-sm">Hasil utama DISC<RequiredMark />
+            <select className={fieldClass} value={candidate.discType} onChange={(event) => update(index, "discType", event.target.value)} required>
+              <option value="">Pilih tipe DISC</option>
+              {["D", "I", "S", "C"].map((type) => <option key={type} value={type}>{type}</option>)}
+            </select>
+          </label>
+          <label className="space-y-1 text-sm">Laporan DISC (PDF/JPG/PNG, maks. 5 MB)<RequiredMark />
+            <input className={fieldClass} type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={(event) => update(index, "discReport", event.target.files?.[0] || null)} required />
+          </label>
+        </>
+      )}
     </fieldset>
   );
 }
@@ -1049,6 +1242,9 @@ export function VendorEmployeesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [draft, setDraft] = useState<CandidateDraft>(emptyCandidate());
   const [editingEmployee, setEditingEmployee] = useState<VendorEmployee | null>(null);
+  const [employeeAddress, setEmployeeAddress] = useState({ provinsi: "", kabKota: "", kecamatan: "", kelurahan: "" });
+  const [employeeDomicileAddress, setEmployeeDomicileAddress] = useState({ provinsi: "", kabKota: "", kecamatan: "", kelurahan: "" });
+  const [employeeDomicileSameAsKtp, setEmployeeDomicileSameAsKtp] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -1076,6 +1272,7 @@ export function VendorEmployeesPage() {
     try {
       await sendJson("/api/vendor-employee", "POST", {
         ...draft,
+        domisiliSesuaiKtp: draft.domisiliSesuaiKtp === "SAMA",
         fotoKtp: await readImage(draft.fotoKtp),
         fotoSim: await readImage(draft.fotoSim),
         skck: await readImage(draft.skck),
@@ -1113,10 +1310,13 @@ export function VendorEmployeesPage() {
         phone: form.get("phone"),
         email: form.get("email"),
         alamat: form.get("alamat"),
-        kelurahan: form.get("kelurahan"),
-        kecamatan: form.get("kecamatan"),
-        kabKota: form.get("kabKota"),
-        provinsi: form.get("provinsi"),
+        ...employeeAddress,
+        domisiliSesuaiKtp: employeeDomicileSameAsKtp,
+        domisiliAlamat: form.get("domisiliAlamat"),
+        domisiliKelurahan: employeeDomicileAddress.kelurahan,
+        domisiliKecamatan: employeeDomicileAddress.kecamatan,
+        domisiliKabKota: employeeDomicileAddress.kabKota,
+        domisiliProvinsi: employeeDomicileAddress.provinsi,
         ...(skck instanceof File && skck.size > 0 ? { skck: await readImage(skck) } : {}),
       });
       setEditingEmployee(null);
@@ -1150,7 +1350,18 @@ export function VendorEmployeesPage() {
                 <TableCell>{employee.phone}</TableCell>
                 <TableCell>{[employee.provinsi, employee.kabKota, employee.kecamatan, employee.kelurahan, employee.alamat].filter(Boolean).join(", ")}</TableCell>
                 <TableCell>
-                  <Button size="sm" variant="outline" onClick={() => { setError(null); setEditingEmployee(employee); }}>
+                  <Button size="sm" variant="outline" onClick={() => {
+                    setError(null);
+                    setEditingEmployee(employee);
+                    setEmployeeAddress({ provinsi: employee.provinsi, kabKota: employee.kabKota, kecamatan: employee.kecamatan, kelurahan: employee.kelurahan });
+                    setEmployeeDomicileAddress({
+                      provinsi: employee.domisiliProvinsi || "",
+                      kabKota: employee.domisiliKabKota || "",
+                      kecamatan: employee.domisiliKecamatan || "",
+                      kelurahan: employee.domisiliKelurahan || "",
+                    });
+                    setEmployeeDomicileSameAsKtp(employee.domisiliSesuaiKtp);
+                  }}>
                     Edit data karyawan
                   </Button>
                 </TableCell>
@@ -1193,11 +1404,28 @@ export function VendorEmployeesPage() {
                 </select>
               </label>
               <label className="space-y-1 text-sm">Nomor SIM<RequiredMark /><input className={fieldClass} name="noSim" inputMode="numeric" defaultValue={editingEmployee.noSim} required /></label>
-              <label className="space-y-1 text-sm">Provinsi<RequiredMark /><input className={fieldClass} name="provinsi" defaultValue={editingEmployee.provinsi} required /></label>
-              <label className="space-y-1 text-sm">Kabupaten/Kota<RequiredMark /><input className={fieldClass} name="kabKota" defaultValue={editingEmployee.kabKota} required /></label>
-              <label className="space-y-1 text-sm">Kecamatan<RequiredMark /><input className={fieldClass} name="kecamatan" defaultValue={editingEmployee.kecamatan} required /></label>
-              <label className="space-y-1 text-sm">Kelurahan/Desa<RequiredMark /><input className={fieldClass} name="kelurahan" defaultValue={editingEmployee.kelurahan} required /></label>
-              <label className="space-y-1 text-sm md:col-span-2">Alamat<RequiredMark /><textarea className={fieldClass} name="alamat" rows={2} defaultValue={editingEmployee.alamat} required /></label>
+              <p className="text-sm font-medium md:col-span-2">Alamat sesuai KTP</p>
+              <RegionPicker value={employeeAddress} onChange={(field, value) => {
+                if (field === "provinsi" || field === "kabKota" || field === "kecamatan" || field === "kelurahan") {
+                  setEmployeeAddress((current) => ({ ...current, [field]: value }));
+                }
+              }} />
+              <label className="space-y-1 text-sm md:col-span-2">Alamat sesuai KTP<RequiredMark /><textarea className={fieldClass} name="alamat" rows={2} defaultValue={editingEmployee.alamat} required /></label>
+              <label className="space-y-1 text-sm md:col-span-2">Alamat domisili
+                <select className={fieldClass} value={employeeDomicileSameAsKtp ? "SAMA" : "BERBEDA"} onChange={(event) => setEmployeeDomicileSameAsKtp(event.target.value === "SAMA")}>
+                  <option value="SAMA">Sesuai dengan KTP</option><option value="BERBEDA">Berbeda dengan KTP</option>
+                </select>
+              </label>
+              {!employeeDomicileSameAsKtp && (
+                <>
+                  <RegionPicker value={employeeDomicileAddress} onChange={(field, value) => {
+                    if (field === "provinsi" || field === "kabKota" || field === "kecamatan" || field === "kelurahan") {
+                      setEmployeeDomicileAddress((current) => ({ ...current, [field]: value }));
+                    }
+                  }} />
+                  <label className="space-y-1 text-sm md:col-span-2">Alamat domisili<RequiredMark /><textarea className={fieldClass} name="domisiliAlamat" rows={2} defaultValue={editingEmployee.domisiliAlamat || ""} required /></label>
+                </>
+              )}
               <label className="space-y-1 text-sm md:col-span-2">
                 SKCK (PDF/JPG/PNG, maks. 5 MB){!editingEmployee.hasSkck && <RequiredMark />}
                 <input
@@ -1374,6 +1602,17 @@ function VendorCandidateForm({
       setError("Pilih data karyawan untuk setiap kandidat yang menggunakan roster.");
       return;
     }
+    if (candidates.some((candidate) => !candidate.discType || !candidate.discReport)) {
+      setError("Hasil utama dan laporan DISC wajib diisi untuk setiap kandidat.");
+      return;
+    }
+    if (candidates.some((candidate) => candidate.discReport && (
+      candidate.discReport.size > 5 * 1024 * 1024
+      || !["application/pdf", "image/jpeg", "image/png"].includes(candidate.discReport.type)
+    ))) {
+      setError("Laporan DISC harus berupa PDF/JPG/PNG maksimal 5 MB.");
+      return;
+    }
     const selectedEmployeeIds = candidates
       .filter((candidate) => candidate.source === "EMPLOYEE")
       .map((candidate) => candidate.employeeId);
@@ -1397,8 +1636,13 @@ function VendorCandidateForm({
       }
 
       const payload = await Promise.all(candidates.map(async (candidate) => {
-        if (candidate.source === "EMPLOYEE") return { employeeId: candidate.employeeId };
+        const discFields = {
+          discType: candidate.discType,
+          discReport: await readImage(candidate.discReport!),
+        };
+        if (candidate.source === "EMPLOYEE") return { employeeId: candidate.employeeId, ...discFields };
         return {
+          ...discFields,
           name: candidate.name,
           nik: candidate.nik,
           fotoKtp: await readImage(candidate.fotoKtp!),
@@ -1413,6 +1657,12 @@ function VendorCandidateForm({
           kecamatan: candidate.kecamatan,
           kabKota: candidate.kabKota,
           provinsi: candidate.provinsi,
+          domisiliSesuaiKtp: candidate.domisiliSesuaiKtp === "SAMA",
+          domisiliAlamat: candidate.domisiliAlamat,
+          domisiliKelurahan: candidate.domisiliKelurahan,
+          domisiliKecamatan: candidate.domisiliKecamatan,
+          domisiliKabKota: candidate.domisiliKabKota,
+          domisiliProvinsi: candidate.domisiliProvinsi,
         };
       }));
       await sendJson("/api/candidate", "POST", { osRequestId: request.id, candidates: payload });
@@ -1543,9 +1793,20 @@ function VendorCandidateForm({
                         </div>
                       ) : null;
                     })()}
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="space-y-1 text-sm">Hasil utama DISC<RequiredMark />
+                        <select className={fieldClass} value={candidate.discType} onChange={(event) => updateCandidate(index, "discType", event.target.value)} required>
+                          <option value="">Pilih tipe DISC</option>
+                          {["D", "I", "S", "C"].map((type) => <option key={type} value={type}>{type}</option>)}
+                        </select>
+                      </label>
+                      <label className="space-y-1 text-sm">Laporan DISC (PDF/JPG/PNG, maks. 5 MB)<RequiredMark />
+                        <input className={fieldClass} type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={(event) => updateCandidate(index, "discReport", event.target.files?.[0] || null)} required />
+                      </label>
+                    </div>
                   </div>
                 ) : (
-                  <CandidateFields candidate={candidate} index={index} update={updateCandidate} />
+                  <CandidateFields candidate={candidate} index={index} update={updateCandidate} includeDisc />
                 )}
               </fieldset>
               {candidates.length > 1 && request.type !== "PERGANTIAN" && (
@@ -1990,6 +2251,7 @@ export function OSRequestPage() {
     setRequestPosition(firstSelected?.mitraProfile?.posisi || "");
     setRequestPlacement(firstSelected?.mitraProfile?.penempatan || "");
     setRequestWorkHours(firstSelected?.mitraProfile?.waktuKerja || "");
+    setSelectedMitraOffice(firstSelected?.mitraProfile?.penempatan || "");
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -2003,23 +2265,36 @@ export function OSRequestPage() {
       setError("Lengkapi semua pilihan ID Mitra OS.");
       return;
     }
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    if (needsMitraId && !String(form.get("alasan") || "").trim()) {
+      setError("Alasan pergantian atau pengurangan wajib diisi.");
+      return;
+    }
     const selectedProfiles = selectedMitraIds.map((id) => (
       mitras.data.find((mitra) => mitra.mitraProfile?.idMitraOs === id)
     ));
+    if (needsMitraId && !selectedMitraOffice) {
+      setError("Pilih kode kantor terlebih dahulu.");
+      return;
+    }
+    if (needsMitraId && selectedProfiles.some((mitra) => mitra?.mitraProfile?.penempatan !== selectedMitraOffice)) {
+      setError("Semua mitra harus berasal dari kode kantor yang dipilih.");
+      return;
+    }
     if (needsMitraId && new Set(selectedProfiles.map((mitra) => mitra?.mitraProfile?.penempatan)).size > 1) {
       setError("Wilayah operasional semua mitra yang dipilih harus sama dalam satu request.");
       return;
     }
     setSaving(true);
-    const formElement = event.currentTarget;
-    const form = new FormData(formElement);
     try {
       await sendJson("/api/os-request", "POST", {
         type: form.get("type"),
         jumlah: requestQuantity,
         mitraOsIds: needsMitraId ? selectedMitraIds : [],
+        alasan: form.get("alasan"),
         posisi: requestPosition,
-        penempatan: requestPlacement,
+        penempatan: needsMitraId ? selectedMitraOffice : requestPlacement,
         waktuKerja: requestWorkHours,
       });
       formElement.reset();
@@ -2045,6 +2320,12 @@ export function OSRequestPage() {
     .filter((item) => !isFinishedRequest(item))
     .sort((a, b) => Number(b.status === "WAITING_SELECTION") - Number(a.status === "WAITING_SELECTION"));
   const finishedRequests = requests.data.filter(isFinishedRequest);
+  const recentVendorNotifications = requests.data.filter((item) =>
+    (item.type === "PERGANTIAN" || item.type === "PENGURANGAN")
+    &&
+    item.vendorNotifiedAt
+    && new Date(item.vendorNotifiedAt).getTime() >= Date.now() - 14 * 24 * 60 * 60 * 1000,
+  );
   const activeReviewRequest = requests.data.find((item) => item.id === activeReviewRequestId);
   const acceptedCandidateCount = activeReviewRequest?.candidates?.filter(
     (candidate) => candidate.status === "TERPILIH" || candidate.status === "ACTIVATED",
@@ -2275,34 +2556,44 @@ export function OSRequestPage() {
             ) : (
               <div aria-hidden="true" className="min-h-[65px]" />
             )}
-            <label className="space-y-1 text-sm">
-              Posisi Kebutuhan<RequiredMark />
-              <select className={fieldClass} name="posisi" required value={requestPosition} onChange={(event) => setRequestPosition(event.target.value)}>
-                <option value="" disabled>Pilih posisi</option>
-                <option value="OS001: Sorter">OS001: Sorter</option>
-                <option value="OS002: Driver Delivery & Pickup">OS002: Driver Delivery &amp; Pickup</option>
-                <option value="OS003: Kurir Perpaket">OS003: Kurir Perpaket</option>
-                <option value="OS004: Kurir Dedicated">OS004: Kurir Dedicated</option>
-                <option value="OS005: Driver Ondemand">OS005: Driver Ondemand</option>
-              </select>
-            </label>
-            <label className="space-y-1 text-sm">
-              Wilayah Operasional<RequiredMark />
-              <select className={fieldClass} name="penempatan" required value={needsMitraId ? selectedMitraOffice : requestPlacement} disabled={needsMitraId} onChange={(event) => setRequestPlacement(event.target.value)}>
-                <option value="" disabled>Pilih wilayah</option>
-                <option value="kantor1">kantor1</option>
-                <option value="kantor2">kantor2</option>
-                <option value="kantor3">kantor3</option>
-              </select>
-            </label>
-            <label className="space-y-1 text-sm">
-              Waktu Kerja<RequiredMark />
-              <select className={fieldClass} name="waktuKerja" required value={requestWorkHours} onChange={(event) => setRequestWorkHours(event.target.value)}>
-                <option value="" disabled>Pilih waktu kerja</option>
-                <option value="08:00-17:00">08:00-17:00</option>
-                <option value="20:00-05:00">20:00-05:00</option>
-              </select>
-            </label>
+            {needsMitraId && (
+              <label className="space-y-1 text-sm md:col-span-2">
+                Alasan pergantian/pengurangan<RequiredMark />
+                <textarea className={fieldClass} name="alasan" rows={3} maxLength={2000} required />
+              </label>
+            )}
+            {!needsMitraId && (
+              <>
+                <label className="space-y-1 text-sm">
+                  Posisi Kebutuhan<RequiredMark />
+                  <select className={fieldClass} name="posisi" required value={requestPosition} onChange={(event) => setRequestPosition(event.target.value)}>
+                    <option value="" disabled>Pilih posisi</option>
+                    <option value="OS001: Sorter">OS001: Sorter</option>
+                    <option value="OS002: Driver Delivery & Pickup">OS002: Driver Delivery &amp; Pickup</option>
+                    <option value="OS003: Kurir Perpaket">OS003: Kurir Perpaket</option>
+                    <option value="OS004: Kurir Dedicated">OS004: Kurir Dedicated</option>
+                    <option value="OS005: Driver Ondemand">OS005: Driver Ondemand</option>
+                  </select>
+                </label>
+                <label className="space-y-1 text-sm">
+                  Wilayah Operasional<RequiredMark />
+                  <select className={fieldClass} name="penempatan" required value={requestPlacement} onChange={(event) => setRequestPlacement(event.target.value)}>
+                    <option value="" disabled>Pilih wilayah</option>
+                    <option value="kantor1">kantor1</option>
+                    <option value="kantor2">kantor2</option>
+                    <option value="kantor3">kantor3</option>
+                  </select>
+                </label>
+                <label className="space-y-1 text-sm">
+                  Waktu Kerja<RequiredMark />
+                  <select className={fieldClass} name="waktuKerja" required value={requestWorkHours} onChange={(event) => setRequestWorkHours(event.target.value)}>
+                    <option value="" disabled>Pilih waktu kerja</option>
+                    <option value="08:00-17:00">08:00-17:00</option>
+                    <option value="20:00-05:00">20:00-05:00</option>
+                  </select>
+                </label>
+              </>
+            )}
             <FormError error={error} />
             {needsMitraId && mitras.error && <FormError error={`Data Mitra OS gagal dimuat: ${mitras.error}`} />}
           </form>
@@ -2319,6 +2610,38 @@ export function OSRequestPage() {
             </DialogContent>
           </Dialog>
         </>
+      )}
+      {session?.user.role === "VENDOR" && recentVendorNotifications.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Pemberitahuan Mitra OS</CardTitle>
+            <p className="text-sm text-muted-foreground">Request penambahan, pergantian, atau pengurangan dalam 14 hari terakhir.</p>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
+            {recentVendorNotifications.map((item) => {
+                const targetMitras = (item.mitraTargets || []).map((profileId) =>
+                  mitras.data.find((mitra) => mitra.mitraProfile?.id === profileId),
+                );
+                return (
+                  <div key={item.id} className="rounded-md border p-3">
+                    <p className="font-medium">{item.type} · {item.jumlah} mitra</p>
+                    <p className="text-muted-foreground">
+                      {item.vendorNotifiedAt && new Date(item.vendorNotifiedAt).toLocaleDateString("id-ID")}
+                      {" · "}{getOSRequestStatus(item.status)}
+                    </p>
+                    <p className="mt-1">
+                      Mitra terkait: {targetMitras.length > 0
+                        ? targetMitras.map((mitra) => (
+                          `${mitra?.name || "Mitra"} (${mitra?.mitraProfile?.idMitraOs || item.idMitraOs || "-"})`
+                        )).join(", ")
+                        : item.idMitraOs || "-"}
+                    </p>
+                    <p>Alasan: {item.alasan || "Tidak dicantumkan"}</p>
+                  </div>
+                );
+              })}
+          </CardContent>
+        </Card>
       )}
       {["SM", "VENDOR", "VM"].includes(session?.user.role || "") ? (
         <>
@@ -2365,7 +2688,7 @@ export function OSRequestPage() {
             </p>
           </DialogHeader>
           <DialogContent className="space-y-4">
-            {activeReviewRequest?.candidates?.map((candidate) => {
+                {activeReviewRequest?.candidates?.map((candidate) => {
               const missingFields = getMissingCandidateFields(candidate);
               return (
               <div key={candidate.id} className="rounded-lg border p-4">
@@ -2382,6 +2705,26 @@ export function OSRequestPage() {
                       Alamat: {[candidate.provinsi, candidate.kabKota, candidate.kecamatan, candidate.kelurahan, candidate.alamat]
                         .filter(Boolean).join(", ") || "-"}
                     </p>
+                    <p className="text-sm">
+                      Alamat domisili: {candidate.domisiliSesuaiKtp === false
+                        ? [candidate.domisiliProvinsi, candidate.domisiliKabKota, candidate.domisiliKecamatan, candidate.domisiliKelurahan, candidate.domisiliAlamat].filter(Boolean).join(", ")
+                        : "Sesuai dengan KTP"}
+                    </p>
+                    <p className="text-sm">Hasil utama DISC: {candidate.discType || "-"}</p>
+                    {candidate.discType && (
+                      <div className="mt-2 rounded-md bg-muted p-3 text-sm">
+                        <p className="font-medium">Ringkasan DISC — {candidate.name}</p>
+                        <p>{({
+                          D: "Dominance: cenderung tegas, berorientasi pada hasil, dan nyaman mengambil keputusan.",
+                          I: "Influence: cenderung komunikatif, persuasif, dan nyaman berinteraksi dengan orang lain.",
+                          S: "Steadiness: cenderung sabar, konsisten, dan menghargai kestabilan serta kerja sama.",
+                          C: "Compliance: cenderung teliti, analitis, dan memperhatikan prosedur serta standar.",
+                        } as Record<string, string>)[candidate.discType] || "Tipe DISC belum dikenali."}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Gambaran umum berdasarkan tipe utama yang dilaporkan; bukan penilaian psikologis lengkap.
+                        </p>
+                      </div>
+                    )}
                     {missingFields.length > 0 && (
                       <p className="text-sm font-medium text-red-600">
                         Data wajib belum lengkap: {missingFields.join(", ")}. Data lain yang opsional tidak perlu dilengkapi.
@@ -2408,6 +2751,7 @@ export function OSRequestPage() {
                   {candidate.fotoKtp && <a href={candidate.fotoKtp} target="_blank" rel="noreferrer"><img className="h-24 rounded border object-contain" src={candidate.fotoKtp} alt={`Foto KTP ${candidate.name}`} /></a>}
                   {candidate.fotoSim && <a href={candidate.fotoSim} target="_blank" rel="noreferrer"><img className="h-24 rounded border object-contain" src={candidate.fotoSim} alt={`Foto SIM ${candidate.name}`} /></a>}
                   {candidate.skck && <a className="self-center text-sm text-primary underline" href={candidate.skck} target="_blank" rel="noreferrer">Lihat SKCK</a>}
+                  {candidate.discReport && <a className="self-center text-sm text-primary underline" href={candidate.discReport} target="_blank" rel="noreferrer">Lihat laporan DISC</a>}
                 </div>
                 {candidateDecision?.candidateId === candidate.id && (
                   <div className="mt-4 space-y-3 rounded-md bg-muted p-3">

@@ -42,6 +42,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         data: {
           vendorId,
           status: "VENDOR_SELECTED",
+          vendorNotifiedAt: new Date(),
         },
       });
       return NextResponse.json(updated);

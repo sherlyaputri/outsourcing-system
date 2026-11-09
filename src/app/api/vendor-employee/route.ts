@@ -46,6 +46,12 @@ export async function GET(req: NextRequest) {
         kecamatan: true,
         kabKota: true,
         provinsi: true,
+        domisiliSesuaiKtp: true,
+        domisiliAlamat: true,
+        domisiliKelurahan: true,
+        domisiliKecamatan: true,
+        domisiliKabKota: true,
+        domisiliProvinsi: true,
         status: true,
         skck: true,
       },
@@ -112,6 +118,15 @@ export async function PATCH(req: NextRequest) {
     if (!employee.skck && !body.skck) {
       return NextResponse.json({ error: "SKCK wajib diunggah sebelum data karyawan disimpan." }, { status: 400 });
     }
+    if (typeof body.domisiliSesuaiKtp !== "boolean") {
+      return NextResponse.json({ error: "Pilih apakah alamat domisili sama dengan alamat KTP." }, { status: 400 });
+    }
+    if (!body.domisiliSesuaiKtp && ![
+      body.domisiliAlamat, body.domisiliKelurahan, body.domisiliKecamatan,
+      body.domisiliKabKota, body.domisiliProvinsi,
+    ].every(isNonEmptyString)) {
+      return NextResponse.json({ error: "Alamat domisili yang berbeda dengan KTP wajib dilengkapi." }, { status: 400 });
+    }
     const duplicate = await prisma.vendorEmployee.findFirst({
       where: {
         vendorId: session.user.vendorId,
@@ -138,6 +153,12 @@ export async function PATCH(req: NextRequest) {
         kecamatan: body.kecamatan.trim(),
         kabKota: body.kabKota.trim(),
         provinsi: body.provinsi.trim(),
+        domisiliSesuaiKtp: body.domisiliSesuaiKtp,
+        domisiliAlamat: body.domisiliSesuaiKtp ? null : body.domisiliAlamat.trim(),
+        domisiliKelurahan: body.domisiliSesuaiKtp ? null : body.domisiliKelurahan.trim(),
+        domisiliKecamatan: body.domisiliSesuaiKtp ? null : body.domisiliKecamatan.trim(),
+        domisiliKabKota: body.domisiliSesuaiKtp ? null : body.domisiliKabKota.trim(),
+        domisiliProvinsi: body.domisiliSesuaiKtp ? null : body.domisiliProvinsi.trim(),
         ...(body.skck ? { skck: body.skck } : {}),
       },
     });
@@ -159,6 +180,7 @@ export async function POST(req: NextRequest) {
     const {
       name, nik, fotoKtp, jenisSim, noSim, fotoSim, phone, email,
       alamat, kelurahan, kecamatan, kabKota, provinsi, skck,
+      domisiliSesuaiKtp, domisiliAlamat, domisiliKelurahan, domisiliKecamatan, domisiliKabKota, domisiliProvinsi,
     } = body;
 
     if (!isNonEmptyString(name)) {
@@ -192,6 +214,14 @@ export async function POST(req: NextRequest) {
     }
     if (![alamat, kelurahan, kecamatan, kabKota, provinsi].every(isNonEmptyString)) {
       return NextResponse.json({ error: "Alamat dan wilayah tempat tinggal wajib diisi." }, { status: 400 });
+    }
+    if (typeof domisiliSesuaiKtp !== "boolean") {
+      return NextResponse.json({ error: "Pilih apakah alamat domisili sama dengan alamat KTP." }, { status: 400 });
+    }
+    if (!domisiliSesuaiKtp && ![
+      domisiliAlamat, domisiliKelurahan, domisiliKecamatan, domisiliKabKota, domisiliProvinsi,
+    ].every(isNonEmptyString)) {
+      return NextResponse.json({ error: "Alamat domisili yang berbeda dengan KTP wajib dilengkapi." }, { status: 400 });
     }
 
     const totalImageBytes = [fotoKtp, fotoSim, skck].reduce(
@@ -231,6 +261,12 @@ export async function POST(req: NextRequest) {
         kecamatan: kecamatan.trim(),
         kabKota: kabKota.trim(),
         provinsi: provinsi.trim(),
+        domisiliSesuaiKtp,
+        domisiliAlamat: domisiliSesuaiKtp ? null : domisiliAlamat.trim(),
+        domisiliKelurahan: domisiliSesuaiKtp ? null : domisiliKelurahan.trim(),
+        domisiliKecamatan: domisiliSesuaiKtp ? null : domisiliKecamatan.trim(),
+        domisiliKabKota: domisiliSesuaiKtp ? null : domisiliKabKota.trim(),
+        domisiliProvinsi: domisiliSesuaiKtp ? null : domisiliProvinsi.trim(),
       },
     });
     return NextResponse.json(employee, { status: 201 });

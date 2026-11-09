@@ -36,11 +36,19 @@ export async function GET() {
       });
       counts["/dashboard/absensi"] = todayAttendance?.checkIn && todayAttendance.checkOut ? 0 : 1;
     } else if (session.user.role === "VENDOR" && session.user.vendorId) {
-      const [requests, incompleteEmployees, incompleteMitraProfiles] = await Promise.all([
+      const notificationWindowStart = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+      const [requests, recentChanges, incompleteEmployees, incompleteMitraProfiles, mitraDocumentProfiles] = await Promise.all([
         prisma.oSRequest.count({
           where: {
             vendorId: session.user.vendorId,
             status: { in: ["VENDOR_SELECTED", "WAITING_VENDOR_REQUEST"] },
+          },
+        }),
+        prisma.oSRequest.count({
+          where: {
+            vendorId: session.user.vendorId,
+            vendorNotifiedAt: { gte: notificationWindowStart },
+            type: { in: ["PENAMBAHAN", "PERGANTIAN", "PENGURANGAN"] },
           },
         }),
         prisma.vendorEmployee.count({
@@ -49,10 +57,18 @@ export async function GET() {
         prisma.mitraProfile.count({
           where: { vendorId: session.user.vendorId, waktuKerja: null },
         }),
+        prisma.mitraProfile.findMany({
+          where: { vendorId: session.user.vendorId, dokumenDeadlineAt: { not: null } },
+          select: { documents: { select: { name: true } } },
+        }),
       ]);
-      counts["/dashboard/request-os"] = requests;
+      const requiredDocuments = ["Ijazah", "Kartu Keluarga", "Foto Seluruh Badan", "SKBN"];
+      const incompleteAdditionalDocuments = mitraDocumentProfiles.filter((profile) =>
+        requiredDocuments.some((name) => !profile.documents.some((document) => document.name === name)),
+      ).length;
+      counts["/dashboard/request-os"] = requests + recentChanges;
       counts["/dashboard/data-karyawan"] = incompleteEmployees;
-      counts["/dashboard/mitra"] = incompleteMitraProfiles;
+      counts["/dashboard/mitra"] = incompleteMitraProfiles + incompleteAdditionalDocuments;
     } else if (session.user.role === "VM") {
       const [accountRequests, osRequests] = await Promise.all([
         prisma.accountRequest.count({ where: { status: "PENDING" } }),

@@ -51,6 +51,13 @@ export async function GET(req: NextRequest) {
             kecamatan: true,
             kabKota: true,
             provinsi: true,
+            domisiliSesuaiKtp: true,
+            domisiliAlamat: true,
+            domisiliKelurahan: true,
+            domisiliKecamatan: true,
+            domisiliKabKota: true,
+            domisiliProvinsi: true,
+            dokumenDeadlineAt: true,
             fotoKtp: true,
             jenisSim: true,
             noSim: true,
@@ -110,6 +117,12 @@ export async function PUT(req: NextRequest) {
       kecamatan,
       kabKota,
       provinsi,
+      domisiliSesuaiKtp,
+      domisiliAlamat,
+      domisiliKelurahan,
+      domisiliKecamatan,
+      domisiliKabKota,
+      domisiliProvinsi,
       noBpjs,
       noRekening,
       namaBank,
@@ -138,10 +151,19 @@ export async function PUT(req: NextRequest) {
     }
     const textFields = [
       phone, tempatLahir, alamat, kelurahan, kecamatan, kabKota, provinsi,
+      domisiliAlamat, domisiliKelurahan, domisiliKecamatan, domisiliKabKota, domisiliProvinsi,
       noBpjs, noRekening, namaBank, jenisSim, noSim,
     ];
     if (textFields.some((value) => value !== undefined && value !== null && typeof value !== "string")) {
       return NextResponse.json({ error: "Format data profil tidak valid." }, { status: 400 });
+    }
+    if (domisiliSesuaiKtp !== undefined && typeof domisiliSesuaiKtp !== "boolean") {
+      return NextResponse.json({ error: "Pilihan alamat domisili tidak valid." }, { status: 400 });
+    }
+    if (domisiliSesuaiKtp === false && ![
+      domisiliAlamat, domisiliKelurahan, domisiliKecamatan, domisiliKabKota, domisiliProvinsi,
+    ].every((value) => typeof value === "string" && value.trim())) {
+      return NextResponse.json({ error: "Alamat domisili yang berbeda dengan KTP wajib dilengkapi." }, { status: 400 });
     }
     if (tanggalLahir && (typeof tanggalLahir !== "string" || Number.isNaN(new Date(tanggalLahir).getTime()))) {
       return NextResponse.json({ error: "Tanggal lahir tidak valid." }, { status: 400 });
@@ -241,6 +263,12 @@ export async function PUT(req: NextRequest) {
         kecamatan: kecamatan?.trim() || null,
         kabKota: kabKota?.trim() || null,
         provinsi: provinsi?.trim() || null,
+        ...(domisiliSesuaiKtp !== undefined ? { domisiliSesuaiKtp } : {}),
+        domisiliAlamat: domisiliSesuaiKtp === false ? domisiliAlamat.trim() : null,
+        domisiliKelurahan: domisiliSesuaiKtp === false ? domisiliKelurahan.trim() : null,
+        domisiliKecamatan: domisiliSesuaiKtp === false ? domisiliKecamatan.trim() : null,
+        domisiliKabKota: domisiliSesuaiKtp === false ? domisiliKabKota.trim() : null,
+        domisiliProvinsi: domisiliSesuaiKtp === false ? domisiliProvinsi.trim() : null,
         noBpjs: noBpjs?.trim() || null,
         noRekening: noRekening?.trim() || null,
         namaBank: namaBank?.trim() || null,

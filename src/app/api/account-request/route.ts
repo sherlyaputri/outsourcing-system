@@ -199,6 +199,9 @@ export async function PATCH(req: NextRequest) {
             throw new CandidateQuotaReachedError();
           }
         }
+        const documentDeadlineAt = accountReq.candidate
+          ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+          : null;
 
         const user = await tx.user.create({
           data: {
@@ -235,6 +238,13 @@ export async function PATCH(req: NextRequest) {
               kecamatan: accountReq.candidate.kecamatan,
               kabKota: accountReq.candidate.kabKota,
               provinsi: accountReq.candidate.provinsi,
+              domisiliSesuaiKtp: accountReq.candidate.domisiliSesuaiKtp,
+              domisiliAlamat: accountReq.candidate.domisiliAlamat,
+              domisiliKelurahan: accountReq.candidate.domisiliKelurahan,
+              domisiliKecamatan: accountReq.candidate.domisiliKecamatan,
+              domisiliKabKota: accountReq.candidate.domisiliKabKota,
+              domisiliProvinsi: accountReq.candidate.domisiliProvinsi,
+              dokumenDeadlineAt: documentDeadlineAt,
               posisi: accountReq.candidate.replacementMitraProfile?.posisi
                 || accountReq.candidate.osRequest.posisi,
               penempatan: accountReq.candidate.replacementMitraProfile?.penempatan
@@ -243,7 +253,7 @@ export async function PATCH(req: NextRequest) {
           });
           await tx.candidate.update({
             where: { id: accountReq.candidate.id },
-            data: { status: "ACTIVATED" },
+            data: { status: "ACTIVATED", documentDeadlineAt },
           });
           if (accountReq.candidate.vendorEmployeeId) {
             await tx.vendorEmployee.update({

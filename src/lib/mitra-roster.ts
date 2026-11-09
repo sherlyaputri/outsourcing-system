@@ -52,6 +52,12 @@ export async function returnMitraToRoster(
     kecamatan: profile.kecamatan!,
     kabKota: profile.kabKota!,
     provinsi: profile.provinsi!,
+    domisiliSesuaiKtp: profile.domisiliSesuaiKtp,
+    domisiliAlamat: profile.domisiliAlamat,
+    domisiliKelurahan: profile.domisiliKelurahan,
+    domisiliKecamatan: profile.domisiliKecamatan,
+    domisiliKabKota: profile.domisiliKabKota,
+    domisiliProvinsi: profile.domisiliProvinsi,
     status: "ACTIVE",
   };
   const existingEmployee = await tx.vendorEmployee.findFirst({

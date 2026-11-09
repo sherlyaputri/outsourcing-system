@@ -187,7 +187,7 @@ export default function Sidebar({ role, userName, vendorName }: SidebarProps) {
               <span className="flex-1">{item.label}</span>
               {(notificationCounts[item.href] || 0) > 0 && (
                 <span
-                  aria-label={`${notificationCounts[item.href]} aksi menunggu`}
+                  aria-label={`${notificationCounts[item.href]} aksi atau pemberitahuan`}
                   className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-[11px] font-bold leading-none text-white"
                 >
                   {notificationCounts[item.href]}

@@ -41,6 +41,14 @@ export async function GET(req: NextRequest) {
           kecamatan: true,
           kabKota: true,
           provinsi: true,
+          domisiliSesuaiKtp: true,
+          domisiliAlamat: true,
+          domisiliKelurahan: true,
+          domisiliKecamatan: true,
+          domisiliKabKota: true,
+          domisiliProvinsi: true,
+          discType: true,
+          discReport: true,
           status: true,
           alasanKeputusan: true,
           accountRequest: { select: { status: true } },
@@ -107,6 +115,12 @@ export async function POST(req: NextRequest) {
     }
 
     const needsMitraId = type === "PERGANTIAN" || type === "PENGURANGAN";
+    if (needsMitraId && (typeof alasan !== "string" || !alasan.trim())) {
+      return NextResponse.json({ error: "Alasan pergantian atau pengurangan wajib diisi." }, { status: 400 });
+    }
+    if (alasan !== undefined && alasan !== null && (typeof alasan !== "string" || alasan.length > 2000)) {
+      return NextResponse.json({ error: "Alasan maksimal 2.000 karakter." }, { status: 400 });
+    }
     const mitraOsIds = needsMitraId
       ? Array.isArray(body.mitraOsIds)
         ? body.mitraOsIds.filter((id: unknown): id is string => typeof id === "string").map((id: string) => id.trim())
@@ -149,6 +163,12 @@ export async function POST(req: NextRequest) {
     if (needsMitraId && (!targetVendorId || orderedTargetProfiles.some((profile) => profile.user.vendorId !== targetVendorId))) {
       return NextResponse.json({ error: "Semua mitra dalam satu request harus berasal dari Vendor yang sama." }, { status: 400 });
     }
+    if (needsMitraId && (
+      !["kantor1", "kantor2", "kantor3"].includes(penempatan)
+      || orderedTargetProfiles.some((profile) => profile.penempatan !== penempatan)
+    )) {
+      return NextResponse.json({ error: "Pilih kode kantor yang sesuai dengan semua mitra yang dipilih." }, { status: 400 });
+    }
     const targetPlacements = new Set(orderedTargetProfiles.map((profile) => profile.penempatan));
     if (needsMitraId && targetPlacements.size > 1) {
       return NextResponse.json({ error: "Wilayah operasional semua mitra yang dipilih harus sama dalam satu request." }, { status: 400 });
@@ -163,21 +183,21 @@ export async function POST(req: NextRequest) {
     ];
     const allowedWorkHours = ["08:00-17:00", "20:00-05:00"];
 
-    if (!allowedPositions.includes(posisi)) {
+    if (!needsMitraId && !allowedPositions.includes(posisi)) {
       return NextResponse.json({ error: "Posisi kebutuhan tidak valid" }, { status: 400 });
     }
 
-    if (!allowedWorkHours.includes(waktuKerja)) {
+    if (!needsMitraId && !allowedWorkHours.includes(waktuKerja)) {
       return NextResponse.json({ error: "Waktu kerja tidak valid" }, { status: 400 });
     }
 
-    if (!["kantor1", "kantor2", "kantor3"].includes(penempatan)) {
+    if (!needsMitraId && !["kantor1", "kantor2", "kantor3"].includes(penempatan)) {
       return NextResponse.json({ error: "Kode kantor tidak valid" }, { status: 400 });
     }
 
-    if (needsMitraId && orderedTargetProfiles[0].penempatan !== penempatan) {
-      return NextResponse.json({ error: "Wilayah operasional harus mengikuti mitra yang dipilih." }, { status: 400 });
-    }
+    const effectivePosition = needsMitraId ? orderedTargetProfiles[0].posisi : posisi;
+    const effectivePlacement = needsMitraId ? orderedTargetProfiles[0].penempatan : penempatan;
+    const effectiveWorkHours = needsMitraId ? orderedTargetProfiles[0].waktuKerja : waktuKerja;
 
     const osRequest = await prisma.$transaction(async (tx) => {
       const request = await tx.oSRequest.create({
@@ -187,12 +207,13 @@ export async function POST(req: NextRequest) {
           idMitraOs: needsMitraId ? mitraOsIds[0] : null,
           mitraTargets: needsMitraId ? orderedTargetProfiles.map((profile) => profile.id) : Prisma.JsonNull,
           idPergantian: type === "PERGANTIAN" ? mitraOsIds[0] : null,
-          posisi,
-          penempatan,
-          waktuKerja,
-          alasan,
+          posisi: effectivePosition,
+          penempatan: effectivePlacement,
+          waktuKerja: effectiveWorkHours,
+          alasan: needsMitraId ? alasan.trim() : null,
           requesterId: session.user.id,
           vendorId: targetVendorId || null,
+          vendorNotifiedAt: targetVendorId ? new Date() : null,
           status: type === "PENAMBAHAN" ? "PENDING" : type === "PERGANTIAN" ? "VENDOR_SELECTED" : "COMPLETED",
         },
       });

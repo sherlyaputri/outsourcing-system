@@ -8,20 +8,20 @@ datasource db {
 }
 
 model User {
-  id           String        @id @default(cuid())
-  email        String        @unique
-  password     String
-  initialPasswordEncrypted String? @db.Text
-  name         String
-  role         String // MITRA, VENDOR, VM, SM, GM, COO
-  status       String        @default("ACTIVE") // ACTIVE, INACTIVE, PENDING
-  phone        String?
-  avatar       String?       @db.Text
-  vendorId     String?
-  vendor       Vendor?       @relation(fields: [vendorId], references: [id])
-  mitraProfile MitraProfile?
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id                       String        @id @default(cuid())
+  email                    String        @unique
+  password                 String
+  initialPasswordEncrypted String?       @db.Text
+  name                     String
+  role                     String // MITRA, VENDOR, VM, SM, GM, COO
+  status                   String        @default("ACTIVE") // ACTIVE, INACTIVE, PENDING
+  phone                    String?
+  avatar                   String?       @db.Text
+  vendorId                 String?
+  vendor                   Vendor?       @relation(fields: [vendorId], references: [id])
+  mitraProfile             MitraProfile?
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
 
   // Relations
   attendances        Attendance[]
@@ -33,16 +33,16 @@ model User {
 }
 
 model Vendor {
-  id        String   @id @default(cuid())
-  name      String
-  address   String?  @db.Text
-  phone     String?
-  email     String?
-  status    String   @default("PENDING") // PENDING, ACTIVE, INACTIVE
-  removalReason String? @db.Text
-  removedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @default(now()) @updatedAt
+  id            String    @id @default(cuid())
+  name          String
+  address       String?   @db.Text
+  phone         String?
+  email         String?
+  status        String    @default("PENDING") // PENDING, ACTIVE, INACTIVE
+  removalReason String?   @db.Text
+  removedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @default(now()) @updatedAt
 
   users         User[]
   mitraProfiles MitraProfile[]
@@ -53,41 +53,48 @@ model Vendor {
 }
 
 model MitraProfile {
-  id             String    @id @default(cuid())
-  userId         String    @unique
-  user           User      @relation(fields: [userId], references: [id])
-  vendorId       String
-  vendor         Vendor    @relation(fields: [vendorId], references: [id])
-  idMitraOs      String?
-  nik            String?
-  waktuKerja     String?
-  tempatLahir    String?
-  tanggalLahir   DateTime?
-  alamat         String?   @db.Text
-  kelurahan      String?
-  kecamatan      String?
-  kabKota        String?
-  provinsi       String?
-  noBpjs         String?
-  noRekening     String?
-  namaBank       String?
-  fotoKtp        String?   @db.LongText
-  jenisSim       String?
-  noSim          String?
-  fotoSim        String?   @db.LongText
-  skck           String?   @db.LongText
-  fotoSelfie     String?   @db.LongText
-  faceDescriptor String?   @db.Text
-  penempatan     String?
-  posisi         String?
-  startDate      DateTime?
-  endDate        DateTime?
-  status         String    @default("ACTIVE") // ACTIVE, INACTIVE, REPLACED
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id                String    @id @default(cuid())
+  userId            String    @unique
+  user              User      @relation(fields: [userId], references: [id])
+  vendorId          String
+  vendor            Vendor    @relation(fields: [vendorId], references: [id])
+  idMitraOs         String?
+  nik               String?
+  waktuKerja        String?
+  tempatLahir       String?
+  tanggalLahir      DateTime?
+  alamat            String?   @db.Text
+  kelurahan         String?
+  kecamatan         String?
+  kabKota           String?
+  provinsi          String?
+  domisiliSesuaiKtp Boolean   @default(true)
+  domisiliAlamat    String?   @db.Text
+  domisiliKelurahan String?
+  domisiliKecamatan String?
+  domisiliKabKota   String?
+  domisiliProvinsi  String?
+  dokumenDeadlineAt DateTime?
+  noBpjs            String?
+  noRekening        String?
+  namaBank          String?
+  fotoKtp           String?   @db.LongText
+  jenisSim          String?
+  noSim             String?
+  fotoSim           String?   @db.LongText
+  skck              String?   @db.LongText
+  fotoSelfie        String?   @db.LongText
+  faceDescriptor    String?   @db.Text
+  penempatan        String?
+  posisi            String?
+  startDate         DateTime?
+  endDate           DateTime?
+  status            String    @default("ACTIVE") // ACTIVE, INACTIVE, REPLACED
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  documents MitraDocument[]
-  replacementCandidates Candidate[] @relation("ReplacementTarget")
+  documents             MitraDocument[]
+  replacementCandidates Candidate[]     @relation("ReplacementTarget")
 
   @@index([idMitraOs])
 }
@@ -105,43 +112,44 @@ model MitraDocument {
 }
 
 model Attendance {
-  id           String    @id @default(cuid())
-  userId       String
-  user         User      @relation(fields: [userId], references: [id])
-  date         DateTime  @default(now())
-  checkIn      DateTime?
-  checkOut     DateTime?
-  type         String    @default("HADIR") // HADIR, IZIN, SAKIT, ALPHA
-  fotoCheckIn  String?   @db.LongText
-  fotoCheckOut String?   @db.LongText
-  latitude     Float?
-  longitude    Float?
+  id                String    @id @default(cuid())
+  userId            String
+  user              User      @relation(fields: [userId], references: [id])
+  date              DateTime  @default(now())
+  checkIn           DateTime?
+  checkOut          DateTime?
+  type              String    @default("HADIR") // HADIR, IZIN, SAKIT, ALPHA
+  fotoCheckIn       String?   @db.LongText
+  fotoCheckOut      String?   @db.LongText
+  latitude          Float?
+  longitude         Float?
   latitudeCheckOut  Float?
   longitudeCheckOut Float?
-  note         String?   @db.Text
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  note              String?   @db.Text
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 }
 
 model OSRequest {
-  id           String   @id @default(cuid())
-  type         String // PENAMBAHAN, PERGANTIAN, PENGURANGAN
-  status       String   @default("PENDING") // PENDING, APPROVED_GM, APPROVED_COO, VENDOR_SELECTED, WAITING_SELECTION, WAITING_ACTIVATION, NOT_SELECTED, COMPLETED, REJECTED
-  requesterId  String
-  requester    User     @relation("OSRequestCreator", fields: [requesterId], references: [id])
-  vendorId     String?
-  vendor       Vendor?  @relation("OSRequestVendor", fields: [vendorId], references: [id])
-  jumlah       Int      @default(1)
-  idPergantian String?
-  idMitraOs    String?
-  mitraTargets Json?
-  posisi       String?
-  penempatan   String?
-  waktuKerja   String?
-  alasan       String?  @db.Text
-  catatan      String?  @db.Text
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id               String    @id @default(cuid())
+  type             String // PENAMBAHAN, PERGANTIAN, PENGURANGAN
+  status           String    @default("PENDING") // PENDING, APPROVED_GM, APPROVED_COO, VENDOR_SELECTED, WAITING_SELECTION, WAITING_ACTIVATION, NOT_SELECTED, COMPLETED, REJECTED
+  requesterId      String
+  requester        User      @relation("OSRequestCreator", fields: [requesterId], references: [id])
+  vendorId         String?
+  vendor           Vendor?   @relation("OSRequestVendor", fields: [vendorId], references: [id])
+  vendorNotifiedAt DateTime?
+  jumlah           Int       @default(1)
+  idPergantian     String?
+  idMitraOs        String?
+  mitraTargets     Json?
+  posisi           String?
+  penempatan       String?
+  waktuKerja       String?
+  alasan           String?   @db.Text
+  catatan          String?   @db.Text
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   approvals  Approval[]
   candidates Candidate[]
@@ -163,59 +171,75 @@ model Approval {
 }
 
 model Candidate {
-  id               String          @id @default(cuid())
-  osRequestId      String
-  osRequest        OSRequest       @relation(fields: [osRequestId], references: [id])
-  name             String
-  nik              String?
-  fotoKtp          String?         @db.LongText
-  jenisSim         String?
-  noSim            String?
-  fotoSim          String?         @db.LongText
-  skck             String?         @db.LongText
-  phone            String?
-  email            String?
-  alamat           String?         @db.Text
-  kelurahan        String?
-  kecamatan        String?
-  kabKota          String?
-  provinsi         String?
-  namaBank         String?
-  noRekening       String?
-  accountRequestId String?         @unique
-  accountRequest   AccountRequest? @relation(fields: [accountRequestId], references: [id])
-  vendorEmployeeId String?
-  vendorEmployee   VendorEmployee? @relation(fields: [vendorEmployeeId], references: [id], onDelete: SetNull)
+  id                        String          @id @default(cuid())
+  osRequestId               String
+  osRequest                 OSRequest       @relation(fields: [osRequestId], references: [id])
+  name                      String
+  nik                       String?
+  fotoKtp                   String?         @db.LongText
+  jenisSim                  String?
+  noSim                     String?
+  fotoSim                   String?         @db.LongText
+  skck                      String?         @db.LongText
+  phone                     String?
+  email                     String?
+  alamat                    String?         @db.Text
+  kelurahan                 String?
+  kecamatan                 String?
+  kabKota                   String?
+  provinsi                  String?
+  domisiliSesuaiKtp         Boolean         @default(true)
+  domisiliAlamat            String?         @db.Text
+  domisiliKelurahan         String?
+  domisiliKecamatan         String?
+  domisiliKabKota           String?
+  domisiliProvinsi          String?
+  discType                  String?
+  discReport                String?         @db.LongText
+  acceptedAt                DateTime?
+  documentDeadlineAt        DateTime?
+  namaBank                  String?
+  noRekening                String?
+  accountRequestId          String?         @unique
+  accountRequest            AccountRequest? @relation(fields: [accountRequestId], references: [id])
+  vendorEmployeeId          String?
+  vendorEmployee            VendorEmployee? @relation(fields: [vendorEmployeeId], references: [id], onDelete: SetNull)
   replacementMitraProfileId String?
-  replacementMitraProfile MitraProfile? @relation("ReplacementTarget", fields: [replacementMitraProfileId], references: [id], onDelete: SetNull)
-  status           String          @default("KANDIDAT") // KANDIDAT, TERPILIH, DITOLAK, ACTIVATED
-  alasanKeputusan  String?         @db.Text
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  replacementMitraProfile   MitraProfile?   @relation("ReplacementTarget", fields: [replacementMitraProfileId], references: [id], onDelete: SetNull)
+  status                    String          @default("KANDIDAT") // KANDIDAT, TERPILIH, DITOLAK, ACTIVATED
+  alasanKeputusan           String?         @db.Text
+  createdAt                 DateTime        @default(now())
+  updatedAt                 DateTime        @updatedAt
 }
 
 model VendorEmployee {
-  id         String      @id @default(cuid())
-  vendorId   String
-  vendor     Vendor      @relation(fields: [vendorId], references: [id], onDelete: Cascade)
-  name       String
-  nik        String
-  fotoKtp    String      @db.LongText
-  jenisSim   String
-  noSim      String
-  fotoSim    String      @db.LongText
-  skck       String?     @db.LongText
-  phone      String
-  email      String
-  alamat     String      @db.Text
-  kelurahan  String
-  kecamatan  String
-  kabKota    String
-  provinsi   String
-  status     String      @default("ACTIVE")
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
-  candidates Candidate[]
+  id                String      @id @default(cuid())
+  vendorId          String
+  vendor            Vendor      @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  name              String
+  nik               String
+  fotoKtp           String      @db.LongText
+  jenisSim          String
+  noSim             String
+  fotoSim           String      @db.LongText
+  skck              String?     @db.LongText
+  phone             String
+  email             String
+  alamat            String      @db.Text
+  kelurahan         String
+  kecamatan         String
+  kabKota           String
+  provinsi          String
+  domisiliSesuaiKtp Boolean     @default(true)
+  domisiliAlamat    String?     @db.Text
+  domisiliKelurahan String?
+  domisiliKecamatan String?
+  domisiliKabKota   String?
+  domisiliProvinsi  String?
+  status            String      @default("ACTIVE")
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+  candidates        Candidate[]
 
   @@index([vendorId, status])
   @@index([email])
