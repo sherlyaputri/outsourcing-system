@@ -9,7 +9,7 @@ export async function GET(
 ) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !["VENDOR", "VM", "SM"].includes(session.user.role)) {
+    if (!session || !["VENDOR", "VM", "SM", "GM", "COO", "MITRA"].includes(session.user.role)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -28,7 +28,8 @@ export async function GET(
     if (
       !document ||
       document.mitraProfile.userId !== params.id ||
-      (session.user.role === "VENDOR" && document.mitraProfile.vendorId !== session.user.vendorId)
+      (session.user.role === "VENDOR" && document.mitraProfile.vendorId !== session.user.vendorId) ||
+      (session.user.role === "MITRA" && document.mitraProfile.userId !== session.user.id)
     ) {
       return NextResponse.json({ error: "Dokumen Mitra tidak ditemukan" }, { status: 404 });
     }

@@ -16,7 +16,7 @@ model User {
   role                     String // MITRA, VENDOR, VM, SM, GM, COO
   status                   String        @default("ACTIVE") // ACTIVE, INACTIVE, PENDING
   phone                    String?
-  avatar                   String?       @db.Text
+  avatar                   String?       @db.LongText
   vendorId                 String?
   vendor                   Vendor?       @relation(fields: [vendorId], references: [id])
   mitraProfile             MitraProfile?

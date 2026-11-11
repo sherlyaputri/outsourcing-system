@@ -33,13 +33,15 @@ export function formatCurrency(amount: number): string {
 
 export function getStatusColor(status: string): string {
   const colors: Record<string, string> = {
-    ACTIVE: 'bg-green-100 text-green-800',
-    INACTIVE: 'bg-gray-100 text-gray-800',
-    PENDING: 'bg-yellow-100 text-yellow-800',
-    APPROVED: 'bg-green-100 text-green-800',
-    APPROVED_GM: 'bg-blue-100 text-blue-800',
-    APPROVED_COO: 'bg-indigo-100 text-indigo-800',
-    REJECTED: 'bg-red-100 text-red-800',
+    ACTIVE: 'bg-green-100 text-green-700 border-green-300 dark:bg-green-950/40 dark:text-green-400 dark:border-green-800',
+    INACTIVE: 'bg-red-100 text-red-700 border-red-300 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800',
+    TIDAK_AKTIF: 'bg-red-100 text-red-700 border-red-300 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800',
+    NONAKTIF: 'bg-red-100 text-red-700 border-red-300 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800',
+    PENDING: 'bg-yellow-100 text-yellow-800 border-yellow-300',
+    APPROVED: 'bg-green-100 text-green-700 border-green-300',
+    APPROVED_GM: 'bg-blue-100 text-blue-800 border-blue-300',
+    APPROVED_COO: 'bg-indigo-100 text-indigo-800 border-indigo-300',
+    REJECTED: 'bg-red-100 text-red-700 border-red-300',
     DRAFT: 'bg-gray-100 text-gray-800',
     SUBMITTED: 'bg-blue-100 text-blue-800',
     VERIFIED: 'bg-purple-100 text-purple-800',
@@ -75,7 +77,9 @@ export function getStatusColor(status: string): string {
 export function getStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     ACTIVE: 'Aktif',
-    INACTIVE: 'Nonaktif',
+    INACTIVE: 'Tidak Aktif',
+    TIDAK_AKTIF: 'Tidak Aktif',
+    NONAKTIF: 'Tidak Aktif',
     PENDING: 'Menunggu',
     APPROVED: 'Disetujui',
     APPROVED_GM: 'Disetujui GM',

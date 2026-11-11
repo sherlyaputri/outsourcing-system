@@ -1,14 +1,15 @@
 "use client";
 
-import { Children, FormEvent, isValidElement, ReactNode, useEffect, useState } from "react";
+import { Children, FormEvent, isValidElement, ReactNode, useEffect, useRef, useState } from "react";
 import { useSession } from "next-auth/react";
 import DashboardLayout from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { FileText } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { FileText, User, Mail, Phone, MapPin, Briefcase, CreditCard, Shield, ExternalLink, Calendar, Edit, Eye, Check } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 interface ApiState<T> {
   data: T;
@@ -34,6 +35,7 @@ interface Mitra {
   name: string;
   email: string;
   status: string;
+  avatar?: string | null;
   initialPassword?: string | null;
   phone?: string | null;
   vendor?: { name: string } | null;
@@ -43,6 +45,7 @@ interface Mitra {
     waktuKerja?: string | null;
     posisi?: string | null;
     penempatan?: string | null;
+    fotoSelfie?: string | null;
     alamat?: string | null;
     kelurahan?: string | null;
     kecamatan?: string | null;
@@ -194,6 +197,9 @@ interface VendorEmployee {
   domisiliKabKota?: string | null;
   domisiliProvinsi?: string | null;
   hasSkck: boolean;
+  fotoKtp?: string | null;
+  fotoSim?: string | null;
+  skck?: string | null;
 }
 
 interface CandidateSubmissionDraft extends CandidateDraft {
@@ -506,43 +512,28 @@ export function MitraManagementPage() {
                   </TableCell>
                 )}
                 <TableCell>
-                  {session?.user.role === "VENDOR" && mitra.mitraProfile && (
-                    <details>
-                      <summary className="cursor-pointer text-primary">Lihat</summary>
-                      <div className="mt-2 min-w-56 space-y-1 text-xs">
-                        <p>Alamat: {[mitra.mitraProfile.provinsi, mitra.mitraProfile.kabKota, mitra.mitraProfile.kecamatan, mitra.mitraProfile.kelurahan, mitra.mitraProfile.alamat].filter(Boolean).join(", ") || "-"}</p>
-                        <p>SIM: {mitra.mitraProfile.jenisSim || "-"} · {mitra.mitraProfile.noSim || "-"}</p>
-                        <p>Bank: {mitra.mitraProfile.namaBank || "-"} · Rekening: {mitra.mitraProfile.noRekening || "-"}</p>
-                        {mitra.mitraProfile.documents?.map((document) => (
-                          <p key={document.id}>
-                            <a
-                              className="text-primary underline"
-                              href={`/api/mitra/${mitra.id}/documents/${document.id}`}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              {document.name}
-                            </a>
-                          </p>
-                        ))}
-                        <div className="flex gap-2">
-                          {mitra.mitraProfile.fotoKtp && <img className="h-20 rounded border object-contain" src={mitra.mitraProfile.fotoKtp} alt="Foto KTP" />}
-                          {mitra.mitraProfile.fotoSim && <img className="h-20 rounded border object-contain" src={mitra.mitraProfile.fotoSim} alt="Foto SIM" />}
-                        </div>
-                      </div>
-                    </details>
-                  )}
-                  {(session?.user.role === "SM" || session?.user.role === "VM") && (
-                    <Button size="sm" variant="outline" onClick={() => setDetailMitra(mitra)}>
-                      Lihat Detail
+                  <div className="flex flex-col gap-1.5 items-start">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-primary hover:text-primary hover:bg-primary/10 flex items-center gap-1.5 text-xs h-7 px-2.5 font-medium"
+                      onClick={() => setDetailMitra(mitra)}
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      Lihat
                     </Button>
-                  )}
-                  {session?.user.role !== "VENDOR" && session?.user.role !== "SM" && session?.user.role !== "VM" && "-"}
-                  {session?.user.role === "VENDOR" && (
-                    <Button className="mt-2" size="sm" variant="outline" onClick={() => setEditingMitra(mitra)}>
-                      Edit data
-                    </Button>
-                  )}
+                    {session?.user.role === "VENDOR" && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-xs h-6 px-2 text-muted-foreground hover:text-foreground flex items-center gap-1"
+                        onClick={() => setEditingMitra(mitra)}
+                      >
+                        <Edit className="h-3 w-3" />
+                        Edit data
+                      </Button>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell><StatusBadge status={mitra.status} /></TableCell>
               </TableRow>
@@ -561,88 +552,395 @@ export function MitraManagementPage() {
         />
       )}
       {detailMitra && (
-        <Dialog open onOpenChange={(open) => { if (!open) setDetailMitra(null); }}>
-          <DialogHeader>
-            <DialogTitle>Detail Mitra OS — {detailMitra.name}</DialogTitle>
-          </DialogHeader>
-          <DialogContent className="space-y-4">
-            <div className="grid gap-3 text-sm sm:grid-cols-2">
-              <p><span className="font-medium">ID Mitra OS:</span> {detailMitra.mitraProfile?.idMitraOs || "-"}</p>
-              <p><span className="font-medium">NIK:</span> {detailMitra.mitraProfile?.nik || "-"}</p>
-              <p><span className="font-medium">Email:</span> {detailMitra.email}</p>
-              <p><span className="font-medium">No. HP:</span> {detailMitra.phone || "-"}</p>
-              <p><span className="font-medium">Tempat, tanggal lahir:</span> {[detailMitra.mitraProfile?.tempatLahir, detailMitra.mitraProfile?.tanggalLahir?.slice(0, 10)].filter(Boolean).join(", ") || "-"}</p>
-              <p><span className="font-medium">Vendor:</span> {detailMitra.vendor?.name || "-"}</p>
-              <p><span className="font-medium">Posisi:</span> {detailMitra.mitraProfile?.posisi || "-"}</p>
-              <p><span className="font-medium">Penempatan:</span> {detailMitra.mitraProfile?.penempatan || "-"}</p>
-              <p><span className="font-medium">No. BPJS:</span> {detailMitra.mitraProfile?.noBpjs || "-"}</p>
-              <p><span className="font-medium">SIM:</span> {[detailMitra.mitraProfile?.jenisSim, detailMitra.mitraProfile?.noSim].filter(Boolean).join(" · ") || "-"}</p>
-              <p><span className="font-medium">Bank:</span> {detailMitra.mitraProfile?.namaBank || "-"}</p>
-              <p><span className="font-medium">No. rekening:</span> {detailMitra.mitraProfile?.noRekening || "-"}</p>
-              <p><span className="font-medium">Jadwal shift:</span> {detailMitra.mitraProfile?.waktuKerja || "-"}</p>
-              <p className="sm:col-span-2">
-                <span className="font-medium">Alamat sesuai KTP:</span>{" "}
-                {[detailMitra.mitraProfile?.provinsi, detailMitra.mitraProfile?.kabKota, detailMitra.mitraProfile?.kecamatan, detailMitra.mitraProfile?.kelurahan, detailMitra.mitraProfile?.alamat]
-                  .filter(Boolean).join(", ") || "-"}
-              </p>
-              <p className="sm:col-span-2">
-                <span className="font-medium">Alamat domisili:</span>{" "}
-                {detailMitra.mitraProfile?.domisiliSesuaiKtp === false
-                  ? [detailMitra.mitraProfile?.domisiliProvinsi, detailMitra.mitraProfile?.domisiliKabKota, detailMitra.mitraProfile?.domisiliKecamatan, detailMitra.mitraProfile?.domisiliKelurahan, detailMitra.mitraProfile?.domisiliAlamat].filter(Boolean).join(", ")
-                  : "Sesuai dengan KTP"}
-              </p>
-            </div>
-            {detailMitra.mitraProfile && (
-              <>
-                <div className="flex flex-wrap gap-4">
-                  {detailMitra.mitraProfile.fotoKtp && (
-                    <div className="space-y-1 text-sm">
-                      <p className="font-medium">Foto KTP</p>
-                      <img className="h-36 max-w-full rounded border object-contain" src={detailMitra.mitraProfile.fotoKtp} alt={`Foto KTP ${detailMitra.name}`} />
-                    </div>
-                  )}
-                  {detailMitra.mitraProfile.fotoSim && (
-                    <div className="space-y-1 text-sm">
-                      <p className="font-medium">Foto SIM</p>
-                      <img className="h-36 max-w-full rounded border object-contain" src={detailMitra.mitraProfile.fotoSim} alt={`Foto SIM ${detailMitra.name}`} />
-                    </div>
-                  )}
-                  {detailMitra.mitraProfile.skck && (
-                    <div className="space-y-1 text-sm">
-                      <p className="font-medium">SKCK</p>
-                      {detailMitra.mitraProfile.skck.startsWith("data:image/") ? (
-                        <a href={detailMitra.mitraProfile.skck} target="_blank" rel="noreferrer">
-                          <img className="h-36 max-w-full rounded border object-contain" src={detailMitra.mitraProfile.skck} alt={`SKCK ${detailMitra.name}`} />
-                        </a>
-                      ) : (
-                        <a className="text-primary underline" href={detailMitra.mitraProfile.skck} target="_blank" rel="noreferrer">Lihat dokumen SKCK</a>
-                      )}
-                    </div>
-                  )}
-                </div>
-                {(detailMitra.mitraProfile.documents?.length || 0) > 0 && (
-                  <div className="space-y-1 text-sm">
-                    <p className="font-medium">Dokumen tambahan</p>
-                    {detailMitra.mitraProfile.documents?.map((document) => (
-                      <p key={document.id}>
-                        <a
-                          className="text-primary underline"
-                          href={`/api/mitra/${detailMitra.id}/documents/${document.id}`}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          {document.name}
-                        </a>
-                      </p>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-          </DialogContent>
-        </Dialog>
+        <MitraDetailDialog
+          mitra={detailMitra}
+          onClose={() => setDetailMitra(null)}
+          onEdit={() => {
+            const target = detailMitra;
+            setDetailMitra(null);
+            setEditingMitra(target);
+          }}
+          canEdit={session?.user.role === "VENDOR"}
+        />
       )}
     </FeaturePage>
+  );
+}
+
+function MitraDetailDialog({
+  mitra,
+  onClose,
+  onEdit,
+  canEdit,
+}: {
+  mitra: Mitra;
+  onClose: () => void;
+  onEdit?: () => void;
+  canEdit?: boolean;
+}) {
+  const profile = mitra.mitraProfile;
+  const profilePhotoDoc = profile?.documents?.find(
+    (d) =>
+      (d.name === "Foto Seluruh Badan" ||
+        d.name === "Foto Profil" ||
+        d.name === "Pas Foto" ||
+        d.name.toLowerCase().includes("foto") ||
+        d.name.toLowerCase().includes("badan") ||
+        d.name.toLowerCase().includes("profil")) &&
+      d.mimeType?.startsWith("image/")
+  );
+  const photo =
+    mitra.avatar ||
+    profile?.fotoSelfie ||
+    (profilePhotoDoc ? `/api/mitra/${mitra.id}/documents/${profilePhotoDoc.id}` : null);
+  const initials = (mitra.name || "M")
+    .split(" ")
+    .filter(Boolean)
+    .map((n) => n[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl font-bold">
+          <User className="h-5 w-5 text-primary" />
+          Detail Data Mitra OS
+        </DialogTitle>
+      </DialogHeader>
+      <DialogContent className="p-0 max-h-[85vh] overflow-y-auto">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 p-6">
+          {/* SISI KIRI: FOTO PROFIL & RINGKASAN (~35%) */}
+          <div className="md:col-span-4 flex flex-col items-center text-center p-5 bg-muted/30 rounded-xl border space-y-3.5 h-fit">
+            {/* Foto Profil */}
+            <div className="mt-1">
+              {photo ? (
+                <img
+                  src={photo}
+                  alt={mitra.name}
+                  className="w-32 h-32 sm:w-36 sm:h-36 rounded-2xl object-cover shadow-md border-2 border-primary/20"
+                />
+              ) : (
+                <div className="w-32 h-32 sm:w-36 sm:h-36 rounded-2xl bg-primary/10 border-2 border-dashed border-primary/30 flex flex-col items-center justify-center text-primary shadow-xs">
+                  <span className="text-3xl font-bold tracking-wider">{initials}</span>
+                  <span className="text-[11px] text-muted-foreground mt-1">Belum ada foto</span>
+                </div>
+              )}
+            </div>
+
+            {/* Status Badge terpisah dengan jarak proporsional dan tidak menimpa foto */}
+            <div>
+              <StatusBadge status={mitra.status} className="px-3 py-1 text-xs font-semibold shadow-xs" />
+            </div>
+
+            {/* Nama & ID */}
+            <div className="w-full space-y-1.5">
+              <h3 className="font-bold text-lg text-foreground leading-tight">{mitra.name}</h3>
+              <p className="text-xs font-mono font-medium text-primary bg-primary/10 py-0.5 px-2.5 rounded-full inline-block">
+                {profile?.idMitraOs ? `ID: ${profile.idMitraOs}` : "ID Belum diatur"}
+              </p>
+            </div>
+
+            <div className="w-full text-left text-xs space-y-2.5 pt-3 border-t">
+              <div className="flex items-start gap-2 text-muted-foreground">
+                <Briefcase className="h-4 w-4 shrink-0 text-primary mt-0.5" />
+                <div>
+                  <p className="font-medium text-foreground">{profile?.posisi || "-"}</p>
+                  <p className="text-[11px] text-muted-foreground">{mitra.vendor?.name || "-"}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <MapPin className="h-4 w-4 shrink-0 text-primary" />
+                <span className="text-foreground">{profile?.penempatan || "-"}</span>
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Calendar className="h-4 w-4 shrink-0 text-primary" />
+                <span className="text-foreground">{profile?.waktuKerja || "Shift belum diatur"}</span>
+              </div>
+            </div>
+
+            {canEdit && onEdit && (
+              <Button
+                variant="default"
+                size="sm"
+                className="w-full mt-2 gap-1.5 text-xs"
+                onClick={onEdit}
+              >
+                <Edit className="h-3.5 w-3.5" />
+                Edit Data Mitra
+              </Button>
+            )}
+          </div>
+
+          {/* SISI KANAN: DATA LENGKAP (~65%) */}
+          <div className="md:col-span-8 space-y-4">
+            {/* 1. DATA PRIBADI & KONTAK */}
+            <div className="bg-card rounded-xl border p-4 space-y-3 shadow-xs">
+              <div className="flex items-center gap-2 pb-2 border-b text-sm font-semibold text-foreground">
+                <User className="h-4 w-4 text-primary" />
+                Data Pribadi & Kontak
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2.5 text-xs">
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">NIK</span>
+                  <span className="font-medium text-foreground">{profile?.nik || "-"}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Tempat, Tanggal Lahir</span>
+                  <span className="font-medium text-foreground">
+                    {[profile?.tempatLahir, profile?.tanggalLahir ? new Date(profile.tanggalLahir).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" }) : null].filter(Boolean).join(", ") || "-"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Email</span>
+                  <span className="font-medium text-foreground">{mitra.email}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Nomor Handphone</span>
+                  <span className="font-medium text-foreground">{mitra.phone || "-"}</span>
+                </div>
+                <div className="sm:col-span-2">
+                  <span className="text-muted-foreground block text-[11px]">Alamat KTP</span>
+                  <span className="font-medium text-foreground leading-relaxed">
+                    {[profile?.provinsi, profile?.kabKota, profile?.kecamatan, profile?.kelurahan, profile?.alamat].filter(Boolean).join(", ") || "-"}
+                  </span>
+                </div>
+                <div className="sm:col-span-2">
+                  <span className="text-muted-foreground block text-[11px]">Alamat Domisili</span>
+                  <span className="font-medium text-foreground leading-relaxed">
+                    {profile?.domisiliSesuaiKtp === false
+                      ? [profile?.domisiliProvinsi, profile?.domisiliKabKota, profile?.domisiliKecamatan, profile?.domisiliKelurahan, profile?.domisiliAlamat].filter(Boolean).join(", ") || "-"
+                      : "Sesuai dengan alamat KTP"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* 2. LEGALITAS & FINANSIAL */}
+            <div className="bg-card rounded-xl border p-4 space-y-3 shadow-xs">
+              <div className="flex items-center gap-2 pb-2 border-b text-sm font-semibold text-foreground">
+                <CreditCard className="h-4 w-4 text-primary" />
+                Legalitas & Finansial
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2.5 text-xs">
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">No. BPJS Ketenagakerjaan</span>
+                  <span className="font-medium text-foreground">{profile?.noBpjs || "-"}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Surat Izin Mengemudi (SIM)</span>
+                  <span className="font-medium text-foreground">
+                    {[profile?.jenisSim, profile?.noSim].filter(Boolean).join(" · ") || "-"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Bank Penerima</span>
+                  <span className="font-medium text-foreground">{profile?.namaBank || "-"}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Nomor Rekening</span>
+                  <span className="font-medium text-foreground">{profile?.noRekening || "-"}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 3. LAMPIRAN DOKUMEN */}
+            <div className="bg-card rounded-xl border p-4 space-y-3 shadow-xs">
+              <div className="flex items-center gap-2 pb-2 border-b text-sm font-semibold text-foreground">
+                <FileText className="h-4 w-4 text-primary" />
+                Lampiran Dokumen & Identitas
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {photo && (
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-medium text-muted-foreground block">Foto Profil / Pas Foto</span>
+                    <a href={photo} target="_blank" rel="noreferrer" className="block group overflow-hidden rounded-lg border bg-muted/20">
+                      <img src={photo} alt="Foto Profil" className="h-24 w-full object-contain group-hover:scale-105 transition-transform" />
+                    </a>
+                  </div>
+                )}
+                {profile?.fotoKtp && (
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-medium text-muted-foreground block">Foto KTP</span>
+                    <a href={profile.fotoKtp} target="_blank" rel="noreferrer" className="block group overflow-hidden rounded-lg border bg-muted/20">
+                      <img src={profile.fotoKtp} alt="KTP" className="h-24 w-full object-contain group-hover:scale-105 transition-transform" />
+                    </a>
+                  </div>
+                )}
+                {profile?.fotoSim && (
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-medium text-muted-foreground block">Foto SIM</span>
+                    <a href={profile.fotoSim} target="_blank" rel="noreferrer" className="block group overflow-hidden rounded-lg border bg-muted/20">
+                      <img src={profile.fotoSim} alt="SIM" className="h-24 w-full object-contain group-hover:scale-105 transition-transform" />
+                    </a>
+                  </div>
+                )}
+                {profile?.skck && (
+                  <div className="space-y-1">
+                    <span className="text-[11px] font-medium text-muted-foreground block">SKCK</span>
+                    {profile.skck.startsWith("data:image/") ? (
+                      <a href={profile.skck} target="_blank" rel="noreferrer" className="block group overflow-hidden rounded-lg border bg-muted/20">
+                        <img src={profile.skck} alt="SKCK" className="h-24 w-full object-contain group-hover:scale-105 transition-transform" />
+                      </a>
+                    ) : (
+                      <a href={profile.skck} target="_blank" rel="noreferrer" className="flex items-center justify-center h-24 rounded-lg border bg-muted/20 text-xs text-primary underline p-2 text-center">
+                        Lihat SKCK
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Dokumen Tambahan */}
+              {profile?.documents && profile.documents.length > 0 && (
+                <div className="pt-2 border-t space-y-1.5">
+                  <span className="text-[11px] font-medium text-muted-foreground block">Dokumen Tambahan:</span>
+                  <div className="flex flex-wrap gap-2">
+                    {profile.documents.map((doc) => (
+                      <a
+                        key={doc.id}
+                        href={`/api/mitra/${mitra.id}/documents/${doc.id}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs bg-muted hover:bg-muted/80 text-foreground border transition-colors"
+                      >
+                        <FileText className="h-3.5 w-3.5 text-primary" />
+                        <span>{doc.name}</span>
+                        <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {!profile?.fotoKtp && !profile?.fotoSim && !profile?.skck && (!profile?.documents || profile.documents.length === 0) && (
+                <p className="text-xs text-muted-foreground italic py-1">Belum ada lampiran dokumen yang diunggah.</p>
+              )}
+            </div>
+          </div>
+        </div>
+        <DialogFooter className="border-t p-4 px-6 flex justify-between sm:justify-between items-center bg-muted/20">
+          <span className="text-xs text-muted-foreground">Tekan tombol Esc atau klik Tutup untuk kembali</span>
+          <Button variant="outline" size="sm" onClick={onClose}>
+            Tutup
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DocumentFileInput({
+  name,
+  label,
+  accept = ".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png",
+  required = false,
+  existingFileName,
+  existingUrl,
+  helpText,
+  multiple = false,
+}: {
+  name: string;
+  label: string;
+  accept?: string;
+  required?: boolean;
+  existingFileName?: string | null;
+  existingUrl?: string | null;
+  helpText?: string;
+  multiple?: boolean;
+}) {
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const hasExisting = Boolean(existingFileName);
+
+  return (
+    <div className="space-y-1.5">
+      <label className="block text-xs font-medium text-foreground cursor-pointer" onClick={() => inputRef.current?.click()}>
+        {label}
+        {required ? <RequiredMark /> : <OptionalMark />}
+      </label>
+
+      <div
+        onClick={() => inputRef.current?.click()}
+        className={cn(
+          "flex items-center justify-between gap-2 px-3 py-2 rounded-lg border text-xs cursor-pointer transition-colors shadow-xs",
+          selectedFile
+            ? "border-blue-400 bg-blue-50/40 text-blue-900"
+            : hasExisting
+            ? "border-green-300 bg-green-50/30 text-green-900"
+            : "border-input bg-background hover:bg-muted/40 text-muted-foreground"
+        )}
+      >
+        <div className="flex items-center gap-2 truncate">
+          <FileText className={cn("h-4 w-4 shrink-0", selectedFile ? "text-blue-600" : hasExisting ? "text-green-600" : "text-muted-foreground")} />
+          <span className="truncate">
+            {selectedFile ? (
+              <span className="text-foreground font-medium">{selectedFile} (Siap diunggah)</span>
+            ) : hasExisting ? (
+              <span className="text-foreground font-semibold">{existingFileName}</span>
+            ) : (
+              <span className="text-muted-foreground italic">Belum ada file dipilih...</span>
+            )}
+          </span>
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          {hasExisting && existingUrl && !selectedFile && (
+            <a
+              href={existingUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (existingUrl.startsWith("data:")) {
+                  e.preventDefault();
+                  const win = window.open("");
+                  if (win) {
+                    if (existingUrl.startsWith("data:application/pdf")) {
+                      win.document.write(`<title>${existingFileName || "Dokumen"}</title><body style="margin:0;"><iframe src="${existingUrl}" style="border:none;width:100vw;height:100vh;"></iframe></body>`);
+                    } else {
+                      win.document.write(`<title>${existingFileName || "Foto"}</title><body style="margin:0;background:#0f172a;display:flex;align-items:center;justify-content:center;min-height:100vh;"><img src="${existingUrl}" style="max-width:95vw;max-height:95vh;object-fit:contain;border-radius:8px;box-shadow:0 10px 25px rgba(0,0,0,0.5);" /></body>`);
+                    }
+                  }
+                }
+              }}
+              className="text-primary hover:underline px-2 py-1 text-[11px] font-medium rounded hover:bg-primary/10 transition-colors"
+            >
+              Lihat
+            </a>
+          )}
+          <span className="px-2.5 py-1 rounded bg-muted font-medium text-foreground text-[11px] hover:bg-muted/80 border">
+            {hasExisting || selectedFile ? "Ganti File" : "Pilih File"}
+          </span>
+        </div>
+
+        <input
+          ref={inputRef}
+          type="file"
+          name={name}
+          accept={accept}
+          required={required && !hasExisting && !selectedFile}
+          multiple={multiple}
+          className="hidden"
+          onChange={(e) => {
+            const files = e.target.files;
+            if (files && files.length > 0) {
+              if (multiple && files.length > 1) {
+                setSelectedFile(`${files.length} file dipilih`);
+              } else {
+                setSelectedFile(files[0].name);
+              }
+            } else {
+              setSelectedFile(null);
+            }
+          }}
+        />
+      </div>
+
+      {helpText && <p className="text-[11px] text-muted-foreground leading-relaxed">{helpText}</p>}
+    </div>
   );
 }
 
@@ -670,6 +968,38 @@ function MitraEditDialog({
     kecamatan: mitra.mitraProfile?.domisiliKecamatan || "",
     kelurahan: mitra.mitraProfile?.domisiliKelurahan || "",
   });
+
+  const profile = mitra.mitraProfile;
+  const existingSelfieUrl = mitra.avatar || profile?.fotoSelfie || null;
+  const existingSelfieName = existingSelfieUrl ? "Pas Foto Profil Mitra (Tersimpan)" : null;
+
+  const existingKtpUrl = profile?.fotoKtp || null;
+  const existingKtpName = existingKtpUrl ? "Foto KTP Mitra (Tersimpan)" : null;
+
+  const existingSimUrl = profile?.fotoSim || null;
+  const existingSimName = existingSimUrl ? "Foto SIM Mitra (Tersimpan)" : null;
+
+  const existingSkckUrl = profile?.skck || null;
+  const existingSkckName = existingSkckUrl ? "Dokumen SKCK (Tersimpan)" : null;
+
+  const skbnDoc = profile?.documents?.find((d) => d.name === "SKBN");
+  const existingSkbnUrl = skbnDoc ? `/api/mitra/${mitra.id}/documents/${skbnDoc.id}` : null;
+  const existingSkbnName = skbnDoc ? "Dokumen SKBN (Tersimpan)" : null;
+
+  const badanDoc = profile?.documents?.find((d) => d.name === "Foto Seluruh Badan");
+  const existingBadanUrl = badanDoc ? `/api/mitra/${mitra.id}/documents/${badanDoc.id}` : null;
+  const existingBadanName = badanDoc ? "Foto Seluruh Badan (Tersimpan)" : null;
+
+  const ijazahDoc = profile?.documents?.find((d) => d.name === "Ijazah");
+  const existingIjazahUrl = ijazahDoc ? `/api/mitra/${mitra.id}/documents/${ijazahDoc.id}` : null;
+  const existingIjazahName = ijazahDoc ? "Dokumen Ijazah (Tersimpan)" : null;
+
+  const kkDoc = profile?.documents?.find((d) => d.name === "Kartu Keluarga");
+  const existingKkUrl = kkDoc ? `/api/mitra/${mitra.id}/documents/${kkDoc.id}` : null;
+  const existingKkName = kkDoc ? "Dokumen Kartu Keluarga (Tersimpan)" : null;
+
+  const otherDocs =
+    profile?.documents?.filter((d) => !["Foto Seluruh Badan", "Ijazah", "Kartu Keluarga", "SKBN"].includes(d.name)) || [];
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -703,12 +1033,24 @@ function MitraEditDialog({
       })));
       const fotoKtp = form.get("fotoKtp");
       const fotoSim = form.get("fotoSim");
+      const fotoSelfie = form.get("fotoSelfie");
       const skck = form.get("skck");
       if (skck instanceof File && skck.size > 5 * 1024 * 1024) {
         throw new Error("Ukuran SKCK maksimal 5 MB.");
       }
       if (skck instanceof File && skck.size > 0 && !["application/pdf", "image/jpeg", "image/png"].includes(skck.type)) {
         throw new Error("SKCK harus berupa PDF, JPG, atau PNG.");
+      }
+      if (fotoSelfie instanceof File && fotoSelfie.size > 5 * 1024 * 1024) {
+        throw new Error("Ukuran Foto Profil maksimal 5 MB.");
+      }
+      if (fotoSelfie instanceof File && fotoSelfie.size > 0 && !["image/jpeg", "image/png"].includes(fotoSelfie.type)) {
+        throw new Error("Foto Profil harus berupa JPG atau PNG.");
+      }
+
+      let selfiePayload: string | undefined;
+      if (fotoSelfie instanceof File && fotoSelfie.size > 0) {
+        selfiePayload = await readImage(fotoSelfie);
       }
 
       await sendJson("/api/mitra", "PUT", {
@@ -733,6 +1075,7 @@ function MitraEditDialog({
         jenisSim: form.get("jenisSim"),
         noSim: form.get("noSim"),
         documents,
+        ...(selfiePayload ? { fotoSelfie: selfiePayload } : {}),
         ...(skck instanceof File && skck.size > 0 ? { skck: await readImage(skck) } : {}),
         ...(fotoKtp instanceof File && fotoKtp.size > 0 ? { fotoKtp: await readImage(fotoKtp) } : {}),
         ...(fotoSim instanceof File && fotoSim.size > 0 ? { fotoSim: await readImage(fotoSim) } : {}),
@@ -829,68 +1172,119 @@ function MitraEditDialog({
                 </label>
               </>
             )}
-            <label className="space-y-1 text-sm md:col-span-2">Dokumen tambahan (PDF/JPG/PNG, maks. 5 MB per file)<OptionalMark />
-              <input className={fieldClass} type="file" name="documents" multiple accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" />
-            </label>
-            <div className="space-y-3 rounded-md border p-3 text-sm md:col-span-2">
-              <div>
-                <p className="font-medium">Dokumen tambahan Mitra OS</p>
-                <p className="text-muted-foreground">
-                  SKBN wajib diunggah sebelum request akun. Lengkapi ijazah, KK, dan foto seluruh badan dalam 14 hari setelah akun Mitra OS diaktifkan.
-                  {mitra.mitraProfile?.dokumenDeadlineAt && ` Tenggat: ${new Date(mitra.mitraProfile.dokumenDeadlineAt).toLocaleDateString("id-ID")}.`}
-                </p>
+            {/* GRUP TUNGGAL: FOTO & DOKUMEN PERSYARATAN MITRA OS */}
+            <div className="space-y-4 rounded-xl border p-4 bg-muted/20 md:col-span-2 shadow-xs">
+              <div className="flex items-center gap-2.5 border-b pb-2.5">
+                <FileText className="h-4 w-4 text-primary" />
+                <div>
+                  <h4 className="font-semibold text-sm text-foreground">Foto & Dokumen Persyaratan Mitra OS</h4>
+                  <p className="text-xs text-muted-foreground">
+                    Unggah pas foto profil, foto seluruh badan, kartu identitas, dan berkas persyaratan resmi Mitra OS.
+                    {mitra.mitraProfile?.dokumenDeadlineAt && ` Tenggat: ${new Date(mitra.mitraProfile.dokumenDeadlineAt).toLocaleDateString("id-ID")}.`}
+                  </p>
+                </div>
               </div>
-              {[
-                ["ijazah", "Ijazah"],
-                ["kartuKeluarga", "Kartu Keluarga"],
-                ["fotoSeluruhBadan", "Foto Seluruh Badan"],
-                ["skbn", "SKBN"],
-              ].map(([field, name]) => {
-                const uploaded = mitra.mitraProfile?.documents?.some((document) => document.name === name);
-                return (
-                  <label key={field} className="block space-y-1">
-                    {name}<OptionalMark />
-                    <input className={fieldClass} type="file" name={field} accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" />
-                    <span className="text-xs text-muted-foreground">{uploaded ? "Sudah diunggah; pilih file untuk mengganti." : "Belum diunggah."}</span>
-                  </label>
-                );
-              })}
+              <div className="grid gap-3.5 md:grid-cols-2 pt-1">
+                {/* 1. FOTO DIRI: PAS FOTO & FOTO SELURUH BADAN */}
+                <DocumentFileInput
+                  name="fotoSelfie"
+                  label="Foto Profil / Pas Foto Mitra (Wajah / Setengah Badan)"
+                  accept="image/jpeg,image/png"
+                  existingFileName={existingSelfieName}
+                  existingUrl={existingSelfieUrl}
+                  helpText="Pas foto formal wajah/setengah badan latar polos untuk avatar profil akun & absensi."
+                />
+                <DocumentFileInput
+                  name="fotoSeluruhBadan"
+                  label="Foto Seluruh Badan / Full Body (JPG/PNG, maks. 5 MB)"
+                  accept="image/jpeg,image/png"
+                  existingFileName={existingBadanName}
+                  existingUrl={existingBadanUrl}
+                  helpText="Foto berdiri tegak kepala hingga kaki dengan seragam/pakaian rapi untuk verifikasi postur fisik."
+                />
+
+                {/* 2. IDENTITAS RESMI: KTP & SIM */}
+                <DocumentFileInput
+                  name="fotoKtp"
+                  label="Foto KTP (JPG/PNG, maks. 5 MB)"
+                  accept="image/jpeg,image/png"
+                  existingFileName={existingKtpName}
+                  existingUrl={existingKtpUrl}
+                  helpText="Unggah foto e-KTP asli yang jelas dan tidak buram."
+                />
+                <DocumentFileInput
+                  name="fotoSim"
+                  label="Foto SIM (JPG/PNG, maks. 5 MB)"
+                  accept="image/jpeg,image/png"
+                  existingFileName={existingSimName}
+                  existingUrl={existingSimUrl}
+                  helpText="Unggah foto SIM (opsional, jika posisi pengemudi atau memiliki SIM)."
+                />
+
+                {/* 3. SURAT KETERANGAN RESMI: SKCK & SKBN */}
+                <DocumentFileInput
+                  name="skck"
+                  label="SKCK (PDF/JPG/PNG, maks. 5 MB)"
+                  required={!profile?.skck}
+                  existingFileName={existingSkckName}
+                  existingUrl={existingSkckUrl}
+                  helpText="Surat Keterangan Catatan Kepolisian yang masih berlaku."
+                />
+                <DocumentFileInput
+                  name="skbn"
+                  label="SKBN - Bebas Narkoba (PDF/JPG/PNG, maks. 5 MB)"
+                  existingFileName={existingSkbnName}
+                  existingUrl={existingSkbnUrl}
+                  helpText="Surat Keterangan Bebas Narkoba resmi dari klinik/RS/BNN."
+                />
+
+                {/* 4. BERKAS PENDIDIKAN & KELUARGA: IJAZAH & KK */}
+                <DocumentFileInput
+                  name="ijazah"
+                  label="Ijazah Terakhir (PDF/JPG/PNG, maks. 5 MB)"
+                  existingFileName={existingIjazahName}
+                  existingUrl={existingIjazahUrl}
+                  helpText="Ijazah pendidikan terakhir Mitra."
+                />
+                <DocumentFileInput
+                  name="kartuKeluarga"
+                  label="Kartu Keluarga (PDF/JPG/PNG, maks. 5 MB)"
+                  existingFileName={existingKkName}
+                  existingUrl={existingKkUrl}
+                  helpText="Kartu Keluarga asli atau fotokopi jelas."
+                />
+
+                {/* 5. DOKUMEN TAMBAHAN LAINNYA */}
+                <div className="md:col-span-2">
+                  <DocumentFileInput
+                    name="documents"
+                    label="Dokumen Tambahan Lainnya (Sertifikat / Berkas Pendukung)"
+                    multiple
+                    existingFileName={otherDocs.length > 0 ? `${otherDocs.length} berkas tambahan sudah tersimpan` : null}
+                    helpText="Pilih berkas pendukung lainnya jika ada (PDF/JPG/PNG, maks. 5 MB per file)."
+                  />
+                </div>
+              </div>
             </div>
-            <label className="space-y-1 text-sm md:col-span-2">
-              SKCK (PDF/JPG/PNG, maks. 5 MB){mitra.mitraProfile?.skck ? <OptionalMark /> : <RequiredMark />}
-              <input
-                className={fieldClass}
-                type="file"
-                name="skck"
-                accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
-                required={!mitra.mitraProfile?.skck}
-              />
-              <span className="block text-xs text-muted-foreground">
-                {mitra.mitraProfile?.skck ? "SKCK sudah tersimpan. Pilih file jika ingin menggantinya." : "SKCK belum tersedia. Unggah dokumen SKCK asli untuk melengkapi data."}
-              </span>
-            </label>
-            <label className="space-y-1 text-sm">Ganti foto KTP (JPG/PNG, maks. 5 MB)<OptionalMark />
-              <input className={fieldClass} type="file" name="fotoKtp" accept="image/jpeg,image/png" />
-            </label>
-            <label className="space-y-1 text-sm">Ganti foto SIM (JPG/PNG, maks. 5 MB)<OptionalMark />
-              <input className={fieldClass} type="file" name="fotoSim" accept="image/jpeg,image/png" />
-            </label>
           </div>
-          {(mitra.mitraProfile?.documents?.length || 0) > 0 && (
-            <div className="space-y-1 text-sm">
-              <p className="font-medium">Dokumen yang sudah diunggah</p>
-              {mitra.mitraProfile?.documents?.map((document) => (
-                <p key={document.id}>
+          {otherDocs.length > 0 && (
+            <div className="space-y-1.5 text-xs bg-muted/30 p-3 rounded-lg border">
+              <p className="font-semibold text-foreground">Dokumen tambahan lain yang tersimpan:</p>
+              <div className="flex flex-wrap gap-2">
+                {otherDocs.map((document) => (
                   <a
-                    className="text-primary underline"
+                    key={document.id}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-background border text-primary hover:underline text-xs"
                     href={`/api/mitra/${mitra.id}/documents/${document.id}`}
                     target="_blank"
                     rel="noreferrer"
                   >
+                    <FileText className="h-3.5 w-3.5" />
                     {document.name}
+                    <ExternalLink className="h-3 w-3 text-muted-foreground" />
                   </a>
-                </p>
-              ))}
+                ))}
+              </div>
             </div>
           )}
           <FormError error={error} />
@@ -1240,16 +1634,289 @@ function CandidateFields({
   );
 }
 
+function VendorEmployeeDetailDialog({
+  employee,
+  onClose,
+  onEdit,
+}: {
+  employee: VendorEmployee;
+  onClose: () => void;
+  onEdit?: () => void;
+}) {
+  const [previewDoc, setPreviewDoc] = useState<{ title: string; url: string } | null>(null);
+
+  const initials = (employee.name || "K")
+    .split(" ")
+    .filter(Boolean)
+    .map((n) => n[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
+  return (
+    <>
+      <Dialog open onOpenChange={(open) => { if (!open) onClose(); }} className="max-w-4xl">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl font-bold">
+            <User className="h-5 w-5 text-primary" />
+            Detail Data Karyawan
+          </DialogTitle>
+        </DialogHeader>
+        <DialogContent className="p-0">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 p-6">
+            {/* SISI KIRI: RINGKASAN (~35%) */}
+            <div className="md:col-span-4 flex flex-col items-center text-center p-5 bg-muted/30 rounded-xl border space-y-3.5 h-fit">
+              <div className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl bg-primary/10 border-2 border-primary/20 flex flex-col items-center justify-center text-primary shadow-xs">
+                <span className="text-3xl font-bold tracking-wider">{initials}</span>
+              </div>
+
+              <div>
+                <StatusBadge status={employee.status} className="px-3 py-1 text-xs font-semibold shadow-xs" />
+              </div>
+
+              <div className="w-full space-y-1">
+                <h3 className="font-bold text-lg text-foreground leading-tight">{employee.name}</h3>
+                <p className="text-xs font-mono font-medium text-primary bg-primary/10 py-0.5 px-2.5 rounded-full inline-block">
+                  NIK: {employee.nik}
+                </p>
+              </div>
+
+              <div className="w-full text-left text-xs space-y-2.5 pt-3 border-t">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <CreditCard className="h-4 w-4 shrink-0 text-primary" />
+                  <span className="text-foreground">SIM {employee.jenisSim} · {employee.noSim}</span>
+                </div>
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Mail className="h-4 w-4 shrink-0 text-primary" />
+                  <span className="text-foreground truncate">{employee.email}</span>
+                </div>
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Phone className="h-4 w-4 shrink-0 text-primary" />
+                  <span className="text-foreground">{employee.phone}</span>
+                </div>
+              </div>
+
+              {onEdit && (
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="w-full mt-2 gap-1.5 text-xs"
+                  onClick={onEdit}
+                >
+                  <Edit className="h-3.5 w-3.5" />
+                  Edit Data Karyawan
+                </Button>
+              )}
+            </div>
+
+            {/* SISI KANAN: DATA LENGKAP & DOKUMEN (~65%) */}
+            <div className="md:col-span-8 space-y-4">
+              {/* 1. DATA PRIBADI & KONTAK */}
+              <div className="bg-card rounded-xl border p-4 space-y-3 shadow-xs">
+                <div className="flex items-center gap-2 pb-2 border-b text-sm font-semibold text-foreground">
+                  <User className="h-4 w-4 text-primary" />
+                  Data Pribadi & Kontak
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2.5 text-xs">
+                  <div>
+                    <span className="text-muted-foreground block text-[11px]">Nama Lengkap</span>
+                    <span className="font-medium text-foreground">{employee.name}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block text-[11px]">NIK KTP (16 digit)</span>
+                    <span className="font-medium font-mono text-foreground">{employee.nik}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block text-[11px]">Email</span>
+                    <span className="font-medium text-foreground">{employee.email}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block text-[11px]">Nomor Handphone</span>
+                    <span className="font-medium text-foreground">{employee.phone}</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block text-[11px]">Surat Izin Mengemudi</span>
+                    <span className="font-medium text-foreground">SIM {employee.jenisSim} ({employee.noSim})</span>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground block text-[11px]">Status Karyawan</span>
+                    <span className="font-medium text-foreground">{employee.status === "ACTIVE" ? "Aktif (Tersedia diajukan)" : "Nonaktif"}</span>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <span className="text-muted-foreground block text-[11px]">Alamat Sesuai KTP</span>
+                    <span className="font-medium text-foreground leading-relaxed">
+                      {[employee.provinsi, employee.kabKota, employee.kecamatan, employee.kelurahan, employee.alamat].filter(Boolean).join(", ") || "-"}
+                    </span>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <span className="text-muted-foreground block text-[11px]">Alamat Domisili</span>
+                    <span className="font-medium text-foreground leading-relaxed">
+                      {employee.domisiliSesuaiKtp === false
+                        ? [employee.domisiliProvinsi, employee.domisiliKabKota, employee.domisiliKecamatan, employee.domisiliKelurahan, employee.domisiliAlamat].filter(Boolean).join(", ") || "-"
+                        : "Sesuai dengan alamat KTP"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. LAMPIRAN DOKUMEN & FOTO */}
+              <div className="bg-card rounded-xl border p-4 space-y-3 shadow-xs">
+                <div className="flex items-center gap-2 pb-2 border-b text-sm font-semibold text-foreground">
+                  <FileText className="h-4 w-4 text-primary" />
+                  Lampiran Dokumen & Foto Karyawan
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {/* Foto KTP */}
+                  <div className="space-y-1.5">
+                    <span className="text-[11px] font-medium text-muted-foreground block">Foto KTP</span>
+                    {employee.fotoKtp ? (
+                      <div
+                        onClick={() => setPreviewDoc({ title: `Foto KTP - ${employee.name}`, url: employee.fotoKtp! })}
+                        className="group relative cursor-pointer overflow-hidden rounded-lg border bg-muted/20 hover:border-primary/50 transition-all shadow-2xs"
+                      >
+                        <img
+                          src={employee.fotoKtp}
+                          alt="Foto KTP"
+                          className="h-28 w-full object-cover group-hover:scale-105 transition-transform"
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white text-xs font-medium gap-1">
+                          <Eye className="h-4 w-4" />
+                          Lihat
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="h-28 rounded-lg border border-dashed flex flex-col items-center justify-center text-muted-foreground text-xs p-2 text-center bg-muted/10">
+                        <span>Belum dilampirkan</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Foto SIM */}
+                  <div className="space-y-1.5">
+                    <span className="text-[11px] font-medium text-muted-foreground block">Foto SIM {employee.jenisSim}</span>
+                    {employee.fotoSim ? (
+                      <div
+                        onClick={() => setPreviewDoc({ title: `Foto SIM - ${employee.name}`, url: employee.fotoSim! })}
+                        className="group relative cursor-pointer overflow-hidden rounded-lg border bg-muted/20 hover:border-primary/50 transition-all shadow-2xs"
+                      >
+                        <img
+                          src={employee.fotoSim}
+                          alt="Foto SIM"
+                          className="h-28 w-full object-cover group-hover:scale-105 transition-transform"
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white text-xs font-medium gap-1">
+                          <Eye className="h-4 w-4" />
+                          Lihat
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="h-28 rounded-lg border border-dashed flex flex-col items-center justify-center text-muted-foreground text-xs p-2 text-center bg-muted/10">
+                        <span>Belum dilampirkan</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Dokumen SKCK */}
+                  <div className="space-y-1.5">
+                    <span className="text-[11px] font-medium text-muted-foreground block">Dokumen SKCK</span>
+                    {employee.skck ? (
+                      employee.skck.startsWith("data:image/") ? (
+                        <div
+                          onClick={() => setPreviewDoc({ title: `Dokumen SKCK - ${employee.name}`, url: employee.skck! })}
+                          className="group relative cursor-pointer overflow-hidden rounded-lg border bg-muted/20 hover:border-primary/50 transition-all shadow-2xs"
+                        >
+                          <img
+                            src={employee.skck}
+                            alt="SKCK"
+                            className="h-28 w-full object-cover group-hover:scale-105 transition-transform"
+                          />
+                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity text-white text-xs font-medium gap-1">
+                            <Eye className="h-4 w-4" />
+                            Lihat
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          onClick={() => setPreviewDoc({ title: `Dokumen SKCK - ${employee.name}`, url: employee.skck! })}
+                          className="h-28 rounded-lg border bg-muted/20 hover:bg-muted/40 cursor-pointer flex flex-col items-center justify-center p-3 text-center transition-colors group"
+                        >
+                          <FileText className="h-8 w-8 text-primary mb-1 group-hover:scale-110 transition-transform" />
+                          <span className="text-xs font-medium text-foreground">Dokumen PDF</span>
+                          <span className="text-[11px] text-primary underline mt-0.5">Klik untuk melihat</span>
+                        </div>
+                      )
+                    ) : (
+                      <div className="h-28 rounded-lg border border-dashed flex flex-col items-center justify-center text-muted-foreground text-xs p-2 text-center bg-muted/10">
+                        <span>Belum dilampirkan</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal Preview Lampiran Fullscreen / Lightbox */}
+      {previewDoc && (
+        <Dialog open onOpenChange={() => setPreviewDoc(null)} className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-sm sm:text-base">
+              <FileText className="h-4 w-4 text-primary" />
+              {previewDoc.title}
+            </DialogTitle>
+          </DialogHeader>
+          <DialogContent className="p-4 flex flex-col items-center">
+            {previewDoc.url.startsWith("data:application/pdf") ? (
+              <iframe
+                src={previewDoc.url}
+                className="w-full h-[70vh] rounded-lg border shadow-xs"
+                title={previewDoc.title}
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center overflow-auto max-h-[70vh] p-2 bg-muted/20 rounded-lg">
+                <img
+                  src={previewDoc.url}
+                  alt={previewDoc.title}
+                  className="max-h-[68vh] w-auto max-w-full object-contain rounded shadow-md"
+                />
+              </div>
+            )}
+            <DialogFooter className="w-full flex justify-end pt-2 border-t">
+              <Button size="sm" variant="outline" onClick={() => setPreviewDoc(null)}>Tutup</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
+  );
+}
+
 export function VendorEmployeesPage() {
   const employees = useApiData<VendorEmployee[]>("/api/vendor-employee", []);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [draft, setDraft] = useState<CandidateDraft>(emptyCandidate());
+  const [detailEmployee, setDetailEmployee] = useState<VendorEmployee | null>(null);
   const [editingEmployee, setEditingEmployee] = useState<VendorEmployee | null>(null);
   const [employeeAddress, setEmployeeAddress] = useState({ provinsi: "", kabKota: "", kecamatan: "", kelurahan: "" });
   const [employeeDomicileAddress, setEmployeeDomicileAddress] = useState({ provinsi: "", kabKota: "", kecamatan: "", kelurahan: "" });
   const [employeeDomicileSameAsKtp, setEmployeeDomicileSameAsKtp] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  function handleOpenEdit(employee: VendorEmployee) {
+    setError(null);
+    setEditingEmployee(employee);
+    setEmployeeAddress({ provinsi: employee.provinsi, kabKota: employee.kabKota, kecamatan: employee.kecamatan, kelurahan: employee.kelurahan });
+    setEmployeeDomicileAddress({
+      provinsi: employee.domisiliProvinsi || "",
+      kabKota: employee.domisiliKabKota || "",
+      kecamatan: employee.domisiliKecamatan || "",
+      kelurahan: employee.domisiliKelurahan || "",
+    });
+    setEmployeeDomicileSameAsKtp(employee.domisiliSesuaiKtp);
+  }
 
   function updateDraft(_index: number, field: keyof CandidateDraft, value: string | File | null) {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -1297,14 +1964,24 @@ export function VendorEmployeesPage() {
     setSaving(true);
     const form = new FormData(event.currentTarget);
     try {
+      const fotoKtp = form.get("fotoKtp");
+      const fotoSim = form.get("fotoSim");
       const skck = form.get("skck");
+
+      if (fotoKtp instanceof File && fotoKtp.size > 5 * 1024 * 1024) {
+        throw new Error("Ukuran Foto KTP maksimal 5 MB.");
+      }
+      if (fotoSim instanceof File && fotoSim.size > 5 * 1024 * 1024) {
+        throw new Error("Ukuran Foto SIM maksimal 5 MB.");
+      }
       if (skck instanceof File && skck.size > 5 * 1024 * 1024) {
         throw new Error("Ukuran SKCK maksimal 5 MB.");
       }
       if (skck instanceof File && skck.size > 0 && !["application/pdf", "image/jpeg", "image/png"].includes(skck.type)) {
         throw new Error("SKCK harus berupa PDF, JPG, atau PNG.");
       }
-      await sendJson("/api/vendor-employee", "PATCH", {
+
+      const payload: Record<string, unknown> = {
         employeeId: editingEmployee.id,
         name: form.get("name"),
         nik: form.get("nik"),
@@ -1312,6 +1989,7 @@ export function VendorEmployeesPage() {
         noSim: form.get("noSim"),
         phone: form.get("phone"),
         email: form.get("email"),
+        status: form.get("status"),
         alamat: form.get("alamat"),
         ...employeeAddress,
         domisiliSesuaiKtp: employeeDomicileSameAsKtp,
@@ -1320,8 +1998,19 @@ export function VendorEmployeesPage() {
         domisiliKecamatan: employeeDomicileAddress.kecamatan,
         domisiliKabKota: employeeDomicileAddress.kabKota,
         domisiliProvinsi: employeeDomicileAddress.provinsi,
-        ...(skck instanceof File && skck.size > 0 ? { skck: await readImage(skck) } : {}),
-      });
+      };
+
+      if (fotoKtp instanceof File && fotoKtp.size > 0) {
+        payload.fotoKtp = await readImage(fotoKtp);
+      }
+      if (fotoSim instanceof File && fotoSim.size > 0) {
+        payload.fotoSim = await readImage(fotoSim);
+      }
+      if (skck instanceof File && skck.size > 0) {
+        payload.skck = await readImage(skck);
+      }
+
+      await sendJson("/api/vendor-employee", "PATCH", payload);
       setEditingEmployee(null);
       employees.reload();
     } catch (uploadError) {
@@ -1344,38 +2033,90 @@ export function VendorEmployeesPage() {
       <Card><CardContent className="overflow-x-auto p-0">
         <LoadingError loading={employees.loading} error={employees.error} empty={!employees.data.length} />
         {!employees.loading && !employees.error && employees.data.length > 0 && (
-          <DataTable headers={["Nama", "NIK", "Email", "No. HP", "Alamat", "Edit Data Karyawan", "Status"]}>
-            {employees.data.map((employee) => (
-              <TableRow key={employee.id}>
-                <TableCell>{employee.name}</TableCell>
-                <TableCell>{employee.nik}</TableCell>
-                <TableCell>{employee.email}</TableCell>
-                <TableCell>{employee.phone}</TableCell>
-                <TableCell>{[employee.provinsi, employee.kabKota, employee.kecamatan, employee.kelurahan, employee.alamat].filter(Boolean).join(", ")}</TableCell>
-                <TableCell>
-                  <Button size="sm" variant="outline" onClick={() => {
-                    setError(null);
-                    setEditingEmployee(employee);
-                    setEmployeeAddress({ provinsi: employee.provinsi, kabKota: employee.kabKota, kecamatan: employee.kecamatan, kelurahan: employee.kelurahan });
-                    setEmployeeDomicileAddress({
-                      provinsi: employee.domisiliProvinsi || "",
-                      kabKota: employee.domisiliKabKota || "",
-                      kecamatan: employee.domisiliKecamatan || "",
-                      kelurahan: employee.domisiliKelurahan || "",
-                    });
-                    setEmployeeDomicileSameAsKtp(employee.domisiliSesuaiKtp);
-                  }}>
-                    Edit data karyawan
-                  </Button>
-                </TableCell>
-                <TableCell><StatusBadge status={employee.status} /></TableCell>
-              </TableRow>
-            ))}
+          <DataTable headers={["Karyawan", "Kontak", "SIM", "Alamat Domisili", "Aksi", "Status"]}>
+            {employees.data.map((employee) => {
+              const initials = (employee.name || "K")
+                .split(" ")
+                .filter(Boolean)
+                .map((n) => n[0])
+                .slice(0, 2)
+                .join("")
+                .toUpperCase();
+
+              const domicileCity = employee.domisiliSesuaiKtp
+                ? [employee.kabKota, employee.provinsi].filter(Boolean).join(", ")
+                : [employee.domisiliKabKota, employee.domisiliProvinsi].filter(Boolean).join(", ");
+
+              const domicileAddress = employee.domisiliSesuaiKtp
+                ? employee.alamat
+                : employee.domisiliAlamat || employee.alamat;
+
+              return (
+                <TableRow key={employee.id}>
+                  <TableCell>
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-xs shrink-0">
+                        {initials}
+                      </div>
+                      <div>
+                        <p className="font-semibold text-foreground text-sm leading-tight">{employee.name}</p>
+                        <p className="text-xs text-muted-foreground font-mono mt-0.5">NIK: {employee.nik}</p>
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="space-y-0.5 text-xs">
+                      <p className="font-medium text-foreground">{employee.email}</p>
+                      <p className="text-muted-foreground">{employee.phone}</p>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div>
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-muted text-foreground border">
+                        SIM {employee.jenisSim}
+                      </span>
+                      <p className="text-[11px] text-muted-foreground font-mono mt-0.5">{employee.noSim}</p>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="max-w-xs space-y-0.5 text-xs">
+                      <p className="font-medium text-foreground">{domicileCity || "-"}</p>
+                      <p className="text-muted-foreground truncate" title={domicileAddress}>
+                        {domicileAddress || "-"}
+                      </p>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-col sm:flex-row gap-1.5 items-start">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-primary hover:text-primary hover:bg-primary/10 flex items-center gap-1 text-xs h-7 px-2.5 font-medium"
+                        onClick={() => setDetailEmployee(employee)}
+                      >
+                        <Eye className="h-3.5 w-3.5" />
+                        Lihat
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-xs h-7 px-2 text-muted-foreground hover:text-foreground flex items-center gap-1"
+                        onClick={() => handleOpenEdit(employee)}
+                      >
+                        <Edit className="h-3 w-3" />
+                        Edit
+                      </Button>
+                    </div>
+                  </TableCell>
+                  <TableCell><StatusBadge status={employee.status} /></TableCell>
+                </TableRow>
+              );
+            })}
           </DataTable>
         )}
       </CardContent></Card>
       {dialogOpen && (
-        <Dialog open onOpenChange={(open) => { if (!open && !saving) setDialogOpen(false); }}>
+        <Dialog open onOpenChange={(open) => { if (!open && !saving) setDialogOpen(false); }} className="max-w-2xl">
           <DialogHeader><DialogTitle>Tambah Data Karyawan</DialogTitle></DialogHeader>
           <DialogContent>
             <form onSubmit={submit} className="space-y-4">
@@ -1392,8 +2133,19 @@ export function VendorEmployeesPage() {
           </DialogContent>
         </Dialog>
       )}
+      {detailEmployee && (
+        <VendorEmployeeDetailDialog
+          employee={detailEmployee}
+          onClose={() => setDetailEmployee(null)}
+          onEdit={() => {
+            const target = detailEmployee;
+            setDetailEmployee(null);
+            handleOpenEdit(target);
+          }}
+        />
+      )}
       {editingEmployee && (
-        <Dialog open onOpenChange={(open) => { if (!open && !saving) setEditingEmployee(null); }}>
+        <Dialog open onOpenChange={(open) => { if (!open && !saving) setEditingEmployee(null); }} className="max-w-2xl">
           <DialogHeader><DialogTitle>Edit Data Karyawan — {editingEmployee.name}</DialogTitle></DialogHeader>
           <DialogContent>
             <form onSubmit={editEmployee} className="grid gap-4 md:grid-cols-2">
@@ -1407,6 +2159,13 @@ export function VendorEmployeesPage() {
                 </select>
               </label>
               <label className="space-y-1 text-sm">Nomor SIM<RequiredMark /><input className={fieldClass} name="noSim" inputMode="numeric" defaultValue={editingEmployee.noSim} required /></label>
+              <label className="space-y-1 text-sm md:col-span-2">
+                Status Karyawan<RequiredMark />
+                <select className={fieldClass} name="status" defaultValue={editingEmployee.status || "ACTIVE"} required>
+                  <option value="ACTIVE">Aktif (Dapat diajukan sebagai kandidat)</option>
+                  <option value="INACTIVE">Nonaktif</option>
+                </select>
+              </label>
               <p className="text-sm font-medium md:col-span-2">Alamat sesuai KTP</p>
               <RegionPicker value={employeeAddress} onChange={(field, value) => {
                 if (field === "provinsi" || field === "kabKota" || field === "kecamatan" || field === "kelurahan") {
@@ -1429,21 +2188,48 @@ export function VendorEmployeesPage() {
                   <label className="space-y-1 text-sm md:col-span-2">Alamat domisili<RequiredMark /><textarea className={fieldClass} name="domisiliAlamat" rows={2} defaultValue={editingEmployee.domisiliAlamat || ""} required /></label>
                 </>
               )}
-              <label className="space-y-1 text-sm md:col-span-2">
-                SKCK (PDF/JPG/PNG, maks. 5 MB){!editingEmployee.hasSkck && <RequiredMark />}
-                <input
-                  className={fieldClass}
-                  type="file"
-                  name="skck"
-                  accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
-                  required={!editingEmployee.hasSkck}
-                />
-                <span className="block text-xs text-muted-foreground">
-                  {editingEmployee.hasSkck ? "SKCK sudah tersimpan. Pilih file hanya jika ingin mengganti." : "SKCK belum diunggah, silakan pilih file."}
-                </span>
-              </label>
+
+              {/* DOKUMEN & LAMPIRAN FOTO */}
+              <div className="md:col-span-2 pt-3 border-t space-y-3">
+                <div>
+                  <h4 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                    <FileText className="h-4 w-4 text-primary" />
+                    Dokumen & Lampiran Foto Karyawan
+                  </h4>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Lihat file yang sudah tersimpan atau pilih file baru jika ingin memperbarui.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 gap-3">
+                  <DocumentFileInput
+                    name="fotoKtp"
+                    label="Foto KTP (JPG/PNG, maks. 5 MB)"
+                    accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                    existingFileName={editingEmployee.fotoKtp ? "Foto KTP (Tersimpan)" : null}
+                    existingUrl={editingEmployee.fotoKtp || undefined}
+                    helpText="Unggah foto e-KTP asli yang jelas dan tidak buram."
+                  />
+                  <DocumentFileInput
+                    name="fotoSim"
+                    label="Foto SIM (JPG/PNG, maks. 5 MB)"
+                    accept=".jpg,.jpeg,.png,image/jpeg,image/png"
+                    existingFileName={editingEmployee.fotoSim ? "Foto SIM (Tersimpan)" : null}
+                    existingUrl={editingEmployee.fotoSim || undefined}
+                    helpText="Unggah foto SIM yang masih berlaku."
+                  />
+                  <DocumentFileInput
+                    name="skck"
+                    label="Dokumen SKCK (PDF/JPG/PNG, maks. 5 MB)"
+                    accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                    existingFileName={editingEmployee.skck ? "Dokumen SKCK (Tersimpan)" : null}
+                    existingUrl={editingEmployee.skck || undefined}
+                    helpText="Surat Keterangan Catatan Kepolisian yang masih berlaku."
+                  />
+                </div>
+              </div>
+
               <FormError error={error} />
-              <div className="flex justify-end gap-2 md:col-span-2">
+              <div className="flex justify-end gap-2 md:col-span-2 pt-2 border-t">
                 <Button type="button" variant="outline" disabled={saving} onClick={() => setEditingEmployee(null)}>Batal</Button>
                 <Button type="submit" disabled={saving}>{saving ? "Menyimpan..." : "Simpan Perubahan"}</Button>
               </div>

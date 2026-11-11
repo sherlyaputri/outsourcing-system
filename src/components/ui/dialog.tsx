@@ -7,9 +7,10 @@ interface DialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   children: React.ReactNode;
+  className?: string;
 }
 
-function Dialog({ open, onOpenChange, children }: DialogProps) {
+function Dialog({ open, onOpenChange, children, className }: DialogProps) {
   React.useEffect(() => {
     if (!open) return;
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -28,7 +29,10 @@ function Dialog({ open, onOpenChange, children }: DialogProps) {
           role="dialog"
           aria-modal="true"
           aria-labelledby="dialog-title"
-          className="relative bg-background rounded-lg shadow-lg w-full max-w-4xl max-h-[90vh] overflow-y-auto"
+          className={cn(
+            "relative bg-background rounded-lg shadow-lg w-full max-w-4xl max-h-[90vh] overflow-y-auto",
+            className
+          )}
         >
           <button
             type="button"

@@ -37,6 +37,7 @@ export async function GET(req: NextRequest) {
         email: true,
         status: true,
         phone: true,
+        avatar: true,
         vendorId: true,
         initialPasswordEncrypted: true,
         mitraProfile: {
@@ -46,6 +47,7 @@ export async function GET(req: NextRequest) {
             waktuKerja: true,
             posisi: true,
             penempatan: true,
+            fotoSelfie: true,
             alamat: true,
             kelurahan: true,
             kecamatan: true,
@@ -132,6 +134,7 @@ export async function PUT(req: NextRequest) {
       fotoSim,
       skck,
       documents,
+      fotoSelfie,
     } = body;
 
     if (typeof userId !== "string" || !userId.trim()) {
@@ -168,15 +171,17 @@ export async function PUT(req: NextRequest) {
     if (tanggalLahir && (typeof tanggalLahir !== "string" || Number.isNaN(new Date(tanggalLahir).getTime()))) {
       return NextResponse.json({ error: "Tanggal lahir tidak valid." }, { status: 400 });
     }
-    const uploadedImages: { fotoKtp?: string; fotoSim?: string } = {};
-    for (const [field, value] of [["fotoKtp", fotoKtp], ["fotoSim", fotoSim]] as const) {
+    const uploadedImages: { fotoKtp?: string; fotoSim?: string; fotoSelfie?: string } = {};
+    for (const [field, value] of [["fotoKtp", fotoKtp], ["fotoSim", fotoSim], ["fotoSelfie", fotoSelfie]] as const) {
       if (value === undefined) continue;
       if (typeof value !== "string") {
-        return NextResponse.json({ error: `Foto ${field === "fotoKtp" ? "KTP" : "SIM"} tidak valid.` }, { status: 400 });
+        const label = field === "fotoKtp" ? "KTP" : field === "fotoSim" ? "SIM" : "Profil";
+        return NextResponse.json({ error: `Foto ${label} tidak valid.` }, { status: 400 });
       }
       const match = value.match(/^data:image\/(?:jpeg|png);base64,([A-Za-z0-9+/]+=*)$/);
       if (!match || Buffer.from(match[1], "base64").length > maxProfileImageBytes) {
-        return NextResponse.json({ error: `Foto ${field === "fotoKtp" ? "KTP" : "SIM"} harus JPG/PNG maksimal 5 MB.` }, { status: 400 });
+        const label = field === "fotoKtp" ? "KTP" : field === "fotoSim" ? "SIM" : "Profil";
+        return NextResponse.json({ error: `Foto ${label} harus JPG/PNG maksimal 5 MB.` }, { status: 400 });
       }
       uploadedImages[field] = value;
     }
@@ -224,6 +229,16 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "Total ukuran dokumen maksimal 15 MB per unggahan." }, { status: 400 });
     }
 
+    if (!uploadedImages.fotoSelfie) {
+      const photoDoc = validatedDocuments.find((d) =>
+        (d.name === "Foto Profil" || d.name === "Pas Foto") &&
+        d.mimeType.startsWith("image/")
+      );
+      if (photoDoc) {
+        uploadedImages.fotoSelfie = photoDoc.content;
+      }
+    }
+
     const mitra = await prisma.user.findFirst({
       where: { id: userId, vendorId: session.user.vendorId, role: "MITRA" },
       include: { mitraProfile: { select: { id: true, waktuKerja: true, skck: true } } },
@@ -248,7 +263,11 @@ export async function PUT(req: NextRequest) {
     const profile = await prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: userId },
-        data: { name: name.trim(), email: email.trim().toLowerCase() },
+        data: {
+          name: name.trim(),
+          email: email.trim().toLowerCase(),
+          ...(uploadedImages.fotoSelfie ? { avatar: uploadedImages.fotoSelfie } : {}),
+        },
       });
       if (phone === null || typeof phone === "string") {
         await tx.user.update({ where: { id: userId }, data: { phone: phone?.trim() || null } });

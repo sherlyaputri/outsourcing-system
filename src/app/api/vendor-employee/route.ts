@@ -53,13 +53,15 @@ export async function GET(req: NextRequest) {
         domisiliKabKota: true,
         domisiliProvinsi: true,
         status: true,
+        fotoKtp: true,
+        fotoSim: true,
         skck: true,
       },
       orderBy: { name: "asc" },
     });
-    return NextResponse.json(employees.map(({ skck, ...employee }) => ({
+    return NextResponse.json(employees.map((employee) => ({
       ...employee,
-      hasSkck: Boolean(skck),
+      hasSkck: Boolean(employee.skck),
     })));
   } catch (error) {
     console.error("Vendor employee GET error:", error);
@@ -81,7 +83,7 @@ export async function PATCH(req: NextRequest) {
     }
     const employee = await prisma.vendorEmployee.findFirst({
       where: { id: employeeId, vendorId: session.user.vendorId },
-      select: { id: true, skck: true },
+      select: { id: true, skck: true, fotoKtp: true, fotoSim: true },
     });
     if (!employee) {
       return NextResponse.json({ error: "Data karyawan tidak ditemukan." }, { status: 404 });
@@ -106,6 +108,15 @@ export async function PATCH(req: NextRequest) {
     const normalizedEmail = body.email.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       return NextResponse.json({ error: "Email harus berformat nama@domain.com." }, { status: 400 });
+    }
+    if (body.fotoKtp !== undefined && !isValidImage(body.fotoKtp)) {
+      return NextResponse.json({ error: "Foto KTP harus berupa JPG/PNG maksimal 5 MB." }, { status: 400 });
+    }
+    if (body.fotoSim !== undefined && !isValidImage(body.fotoSim)) {
+      return NextResponse.json({ error: "Foto SIM harus berupa JPG/PNG maksimal 5 MB." }, { status: 400 });
+    }
+    if (body.status !== undefined && !["ACTIVE", "INACTIVE"].includes(body.status)) {
+      return NextResponse.json({ error: "Status karyawan tidak valid." }, { status: 400 });
     }
     if (body.skck !== undefined && (
       typeof body.skck !== "string" ||
@@ -159,13 +170,17 @@ export async function PATCH(req: NextRequest) {
         domisiliKecamatan: body.domisiliSesuaiKtp ? null : body.domisiliKecamatan.trim(),
         domisiliKabKota: body.domisiliSesuaiKtp ? null : body.domisiliKabKota.trim(),
         domisiliProvinsi: body.domisiliSesuaiKtp ? null : body.domisiliProvinsi.trim(),
+        ...(body.status ? { status: body.status } : {}),
+        ...(body.fotoKtp ? { fotoKtp: body.fotoKtp } : {}),
+        ...(body.fotoSim ? { fotoSim: body.fotoSim } : {}),
         ...(body.skck ? { skck: body.skck } : {}),
       },
     });
     return NextResponse.json({ success: true });
   } catch (error) {
     console.error("Vendor employee PATCH error:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Internal Server Error";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -272,6 +287,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(employee, { status: 201 });
   } catch (error) {
     console.error("Vendor employee POST error:", error);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    const message = error instanceof Error ? error.message : "Internal Server Error";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
