@@ -68,10 +68,11 @@ export async function GET(req: NextRequest) {
         include: {
           user: {
             select: {
+              id: true,
               name: true,
               email: true,
               vendorId: true,
-              mitraProfile: { select: { waktuKerja: true } },
+              mitraProfile: { select: { waktuKerja: true, idMitraOs: true, status: true, posisi: true, penempatan: true } },
             },
           },
         },

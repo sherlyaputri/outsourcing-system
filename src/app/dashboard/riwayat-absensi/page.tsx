@@ -70,13 +70,13 @@ function AttendanceMatrix({ records, month, filter, sort, onSort, onPhoto }: {
     row.days.set(new Date(record.date).getDate(), record);
     row.all.push(record);
   }
-  let rows = [...grouped.values()];
+  let rows = Array.from(grouped.values());
   if (sort) {
     rows.sort((a, b) => {
       const value = (row: typeof rows[number]) => {
-        if (sort.column === "total") return [...row.days.values()].filter((item) => item.type === "HADIR").length;
+        if (sort.column === "total") return Array.from(row.days.values()).filter((item) => item.type === "HADIR").length;
         return ({ name: row.name, id: row.idMitraOs, status: row.status, role: row.role, office: row.office } as Record<string, string>)[sort.column]
-          || (sort.column === "checkIn" ? row.all.find((item) => item.checkIn)?.checkIn || "" : sort.column === "checkOut" ? [...row.all].reverse().find((item) => item.checkOut)?.checkOut || "" : "");
+          || (sort.column === "checkIn" ? row.all.find((item: AttendanceRecord) => item.checkIn)?.checkIn || "" : sort.column === "checkOut" ? [...row.all].reverse().find((item: AttendanceRecord) => item.checkOut)?.checkOut || "" : "");
       };
       const first = value(a); const second = value(b);
       const compared = typeof first === "number" && typeof second === "number" ? first - second : String(first).localeCompare(String(second), "id", { numeric: true, sensitivity: "base" });
@@ -93,7 +93,7 @@ function AttendanceMatrix({ records, month, filter, sort, onSort, onPhoto }: {
       const query = filter.trim().toLocaleLowerCase("id-ID");
       if (query && ![row.name, row.idMitraOs, row.status, row.role, row.office].some((value) => value.toLocaleLowerCase("id-ID").includes(query))) return null;
       const latest = [...row.all].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
-      const total = [...row.days.values()].filter((item) => item.type === "HADIR").length;
+      const total = Array.from(row.days.values()).filter((item) => item.type === "HADIR").length;
       return <TableRow key={row.idMitraOs + row.name}>
         <TableCell className="font-medium">{row.name}</TableCell><TableCell>{row.idMitraOs}</TableCell><TableCell>{row.status}</TableCell><TableCell>{row.role}</TableCell><TableCell>{row.office}</TableCell>
         <TableCell>{latest?.checkIn ? new Date(latest.checkIn).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "-"}</TableCell>
