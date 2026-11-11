@@ -50,6 +50,7 @@ export async function GET(req: NextRequest) {
           discType: true,
           discReport: true,
           status: true,
+          skbn: true,
           alasanKeputusan: true,
           accountRequest: { select: { status: true } },
         }
@@ -58,6 +59,7 @@ export async function GET(req: NextRequest) {
           name: true,
           email: true,
           status: true,
+          skbn: true,
           accountRequest: { select: { status: true } },
         };
 
@@ -77,7 +79,18 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: "desc" },
     });
 
-    return NextResponse.json(requests);
+    const response = requests.map((request) => ({
+      ...request,
+      candidates: request.candidates.map((candidate) => {
+        if ("skbn" in candidate) {
+          const { skbn, ...candidateSummary } = candidate;
+          return { ...candidateSummary, hasSkbn: Boolean(skbn) };
+        }
+        return candidate;
+      }),
+    }));
+
+    return NextResponse.json(response);
   } catch (error) {
     console.error("OS Request GET error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });

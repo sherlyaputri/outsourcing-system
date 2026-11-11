@@ -278,13 +278,24 @@ export async function POST(req: NextRequest) {
     }
 
     const existingUsers = await prisma.user.findMany({
-      where: { email: { in: emails } },
+      where: {
+        email: { in: emails },
+        OR: [
+          { status: "ACTIVE" },
+          { role: { not: "MITRA" } },
+          {
+            mitraProfile: {
+              status: { in: ["ACTIVE", "PENDING"] },
+            },
+          },
+        ],
+      },
       select: { email: true },
     });
     const existingRequests = await prisma.accountRequest.findMany({
       where: {
         email: { in: emails },
-        status: { in: ["WAITING_SELECTION", "PENDING", "APPROVED", "ACTIVATED"] },
+        status: { in: ["WAITING_SELECTION", "PENDING"] },
       },
       select: { email: true },
     });

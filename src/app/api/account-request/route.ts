@@ -52,6 +52,7 @@ export async function GET(req: NextRequest) {
           noSim: true,
           fotoSim: true,
           skck: true,
+          skbn: true,
           alamat: true,
           kelurahan: true,
           kecamatan: true,
@@ -80,7 +81,21 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: "desc" },
     });
 
-    return NextResponse.json(requests);
+    const response = requests.map((request) => {
+      if (request.candidate && "skbn" in request.candidate) {
+        const { skbn, ...candidateSummary } = request.candidate;
+        return {
+          ...request,
+          candidate: {
+            ...candidateSummary,
+            hasSkbn: Boolean(skbn),
+          },
+        };
+      }
+      return request;
+    });
+
+    return NextResponse.json(response);
   } catch (error) {
     console.error("Account Request GET error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
@@ -111,6 +126,12 @@ export async function POST(req: NextRequest) {
       });
       if (!osRequest) return 0;
 
+      const selectedCandidates = await tx.candidate.findMany({
+        where: { osRequestId, status: "TERPILIH" },
+        select: { skbn: true },
+      });
+      if (selectedCandidates.some((candidate) => !candidate.skbn)) return -1;
+
       const requested = await tx.accountRequest.updateMany({
         where: {
           requesterId: session.user.id,
@@ -128,6 +149,9 @@ export async function POST(req: NextRequest) {
       return requested.count;
     });
 
+    if (requestedCount === -1) {
+      return NextResponse.json({ error: "SKBN wajib diunggah untuk semua Mitra yang diterima sebelum request akun." }, { status: 409 });
+    }
     if (requestedCount === 0) {
       return NextResponse.json({ error: "Belum ada kandidat yang lolos seleksi dan siap diajukan." }, { status: 409 });
     }
@@ -182,9 +206,18 @@ export async function PATCH(req: NextRequest) {
       const initialPassword = generateInitialPassword();
       const hashedPassword = await bcrypt.hash(initialPassword, 10);
       const encryptedInitialPassword = encryptInitialPassword(initialPassword);
-      const userWithEmail = await prisma.user.findUnique({ where: { email: accountReq.email } });
+      const userWithEmail = await prisma.user.findUnique({
+        where: { email: accountReq.email },
+        include: { mitraProfile: true },
+      });
       if (userWithEmail) {
-        return NextResponse.json({ error: "Email sudah digunakan oleh akun lain" }, { status: 409 });
+        if (
+          userWithEmail.role !== "MITRA" ||
+          userWithEmail.status === "ACTIVE" ||
+          (userWithEmail.mitraProfile && ["ACTIVE", "PENDING"].includes(userWithEmail.mitraProfile.status))
+        ) {
+          return NextResponse.json({ error: "Email sudah digunakan oleh akun lain" }, { status: 409 });
+        }
       }
 
       const result = await prisma.$transaction(async (tx) => {
@@ -203,54 +236,102 @@ export async function PATCH(req: NextRequest) {
           ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
           : null;
 
-        const user = await tx.user.create({
-          data: {
-            email: accountReq.email,
-            password: hashedPassword,
-            initialPasswordEncrypted: encryptedInitialPassword,
-            name: accountReq.name,
-            role: "MITRA",
-            status: "ACTIVE",
-            phone: accountReq.phone,
-            vendorId: accountReq.vendorId,
-          },
-        });
+        const user = userWithEmail
+          ? await tx.user.update({
+              where: { id: userWithEmail.id },
+              data: {
+                password: hashedPassword,
+                initialPasswordEncrypted: encryptedInitialPassword,
+                name: accountReq.name,
+                role: "MITRA",
+                status: "ACTIVE",
+                phone: accountReq.phone,
+                vendorId: accountReq.vendorId,
+              },
+            })
+          : await tx.user.create({
+              data: {
+                email: accountReq.email,
+                password: hashedPassword,
+                initialPasswordEncrypted: encryptedInitialPassword,
+                name: accountReq.name,
+                role: "MITRA",
+                status: "ACTIVE",
+                phone: accountReq.phone,
+                vendorId: accountReq.vendorId,
+              },
+            });
 
         if (accountReq.candidate) {
           if (!accountReq.vendorId) {
             throw new Error("Candidate account request is missing its vendor");
           }
-          await tx.mitraProfile.create({
-            data: {
-              userId: user.id,
-              vendorId: accountReq.candidate.replacementMitraProfile?.vendorId || accountReq.vendorId,
-              idMitraOs: await generateMitraOsId(tx),
-              nik: accountReq.candidate.nik,
-              waktuKerja: accountReq.candidate.replacementMitraProfile?.waktuKerja
-                || accountReq.candidate.osRequest.waktuKerja,
-              fotoKtp: accountReq.candidate.fotoKtp,
-              jenisSim: accountReq.candidate.jenisSim,
-              noSim: accountReq.candidate.noSim,
-              fotoSim: accountReq.candidate.fotoSim,
-              skck: accountReq.candidate.skck,
-              alamat: accountReq.candidate.alamat,
-              kelurahan: accountReq.candidate.kelurahan,
-              kecamatan: accountReq.candidate.kecamatan,
-              kabKota: accountReq.candidate.kabKota,
-              provinsi: accountReq.candidate.provinsi,
-              domisiliSesuaiKtp: accountReq.candidate.domisiliSesuaiKtp,
-              domisiliAlamat: accountReq.candidate.domisiliAlamat,
-              domisiliKelurahan: accountReq.candidate.domisiliKelurahan,
-              domisiliKecamatan: accountReq.candidate.domisiliKecamatan,
-              domisiliKabKota: accountReq.candidate.domisiliKabKota,
-              domisiliProvinsi: accountReq.candidate.domisiliProvinsi,
-              dokumenDeadlineAt: documentDeadlineAt,
-              posisi: accountReq.candidate.replacementMitraProfile?.posisi
-                || accountReq.candidate.osRequest.posisi,
-              penempatan: accountReq.candidate.replacementMitraProfile?.penempatan
-                || accountReq.candidate.osRequest.penempatan,
-            },
+
+          const existingProfile = await tx.mitraProfile.findUnique({
+            where: { userId: user.id },
           });
+
+          const profileData = {
+            vendorId: accountReq.candidate.replacementMitraProfile?.vendorId || accountReq.vendorId,
+            idMitraOs: existingProfile?.idMitraOs || (await generateMitraOsId(tx)),
+            status: "ACTIVE",
+            endDate: null,
+            nik: accountReq.candidate.nik,
+            waktuKerja: accountReq.candidate.replacementMitraProfile?.waktuKerja
+              || accountReq.candidate.osRequest.waktuKerja,
+            fotoKtp: accountReq.candidate.fotoKtp,
+            jenisSim: accountReq.candidate.jenisSim,
+            noSim: accountReq.candidate.noSim,
+            fotoSim: accountReq.candidate.fotoSim,
+            skck: accountReq.candidate.skck,
+            alamat: accountReq.candidate.alamat,
+            kelurahan: accountReq.candidate.kelurahan,
+            kecamatan: accountReq.candidate.kecamatan,
+            kabKota: accountReq.candidate.kabKota,
+            provinsi: accountReq.candidate.provinsi,
+            domisiliSesuaiKtp: accountReq.candidate.domisiliSesuaiKtp,
+            domisiliAlamat: accountReq.candidate.domisiliAlamat,
+            domisiliKelurahan: accountReq.candidate.domisiliKelurahan,
+            domisiliKecamatan: accountReq.candidate.domisiliKecamatan,
+            domisiliKabKota: accountReq.candidate.domisiliKabKota,
+            domisiliProvinsi: accountReq.candidate.domisiliProvinsi,
+            dokumenDeadlineAt: documentDeadlineAt,
+            posisi: accountReq.candidate.replacementMitraProfile?.posisi
+              || accountReq.candidate.osRequest.posisi,
+            penempatan: accountReq.candidate.replacementMitraProfile?.penempatan
+              || accountReq.candidate.osRequest.penempatan,
+          };
+
+          const mitraProfile = existingProfile
+            ? await tx.mitraProfile.update({
+                where: { id: existingProfile.id },
+                data: profileData,
+              })
+            : await tx.mitraProfile.create({
+                data: {
+                  userId: user.id,
+                  ...profileData,
+                },
+              });
+          if (accountReq.candidate.skbn) {
+            const skbnMatch = accountReq.candidate.skbn.match(
+              /^data:(application\/pdf|image\/jpeg|image\/png);base64,[A-Za-z0-9+/]+={0,2}$/,
+            );
+            if (!skbnMatch) {
+              throw new Error("Candidate SKBN document has an invalid format");
+            }
+            await tx.mitraDocument.deleteMany({
+              where: { mitraProfileId: mitraProfile.id, name: "SKBN" },
+            });
+            await tx.mitraDocument.create({
+              data: {
+                mitraProfileId: mitraProfile.id,
+                name: "SKBN",
+                mimeType: skbnMatch[1],
+                content: accountReq.candidate.skbn,
+              },
+            });
+          }
           await tx.candidate.update({
             where: { id: accountReq.candidate.id },
             data: { status: "ACTIVATED", documentDeadlineAt },

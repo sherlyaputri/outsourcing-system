@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { FileText } from "lucide-react";
 
 interface ApiState<T> {
   data: T;
@@ -96,6 +97,7 @@ interface OSCandidate {
   domisiliProvinsi?: string | null;
   status: string;
   alasanKeputusan?: string | null;
+  hasSkbn?: boolean;
   accountRequest?: { status: string } | null;
 }
 
@@ -136,6 +138,7 @@ interface AccountRequest {
     noSim?: string | null;
     fotoSim?: string | null;
     skck?: string | null;
+    hasSkbn?: boolean;
     alamat?: string | null;
     kelurahan?: string | null;
     kecamatan?: string | null;
@@ -253,7 +256,7 @@ function getOSRequestStatus(status: string) {
   const statuses: Record<string, string> = {
     PENDING: "OS_WAITING_GM",
     APPROVED_GM: "OS_WAITING_COO",
-    APPROVED_COO: "OS_WAITING_ACTIVATION",
+    APPROVED_COO: "OS_WAITING_VM_VENDOR",
     VENDOR_SELECTED: "OS_WAITING_VENDOR_DATA",
     IN_PROGRESS: "OS_WAITING_SELECTION",
     WAITING_SELECTION: "OS_WAITING_SELECTION",
@@ -833,7 +836,7 @@ function MitraEditDialog({
               <div>
                 <p className="font-medium">Dokumen tambahan Mitra OS</p>
                 <p className="text-muted-foreground">
-                  Lengkapi ijazah, KK, foto seluruh badan, dan SKBN dalam 14 hari setelah akun Mitra OS diaktifkan.
+                  SKBN wajib diunggah sebelum request akun. Lengkapi ijazah, KK, dan foto seluruh badan dalam 14 hari setelah akun Mitra OS diaktifkan.
                   {mitra.mitraProfile?.dokumenDeadlineAt && ` Tenggat: ${new Date(mitra.mitraProfile.dokumenDeadlineAt).toLocaleDateString("id-ID")}.`}
                 </p>
               </div>
@@ -1891,6 +1894,7 @@ export function AccountApprovalPage() {
                           {item.candidate.fotoKtp && <img className="h-24 rounded border object-contain" src={item.candidate.fotoKtp} alt="Foto KTP kandidat" />}
                           {item.candidate.fotoSim && <img className="h-24 rounded border object-contain" src={item.candidate.fotoSim} alt="Foto SIM kandidat" />}
                           {item.candidate.skck && <a className="self-center text-primary underline" href={item.candidate.skck} target="_blank" rel="noreferrer">Lihat SKCK</a>}
+                          {item.candidate.hasSkbn && <a className="self-center text-primary underline" href={`/api/candidate/${item.candidate.id}/skbn`} target="_blank" rel="noreferrer">Lihat SKBN</a>}
                         </div>
                       </div>
                     </details>
@@ -2157,7 +2161,9 @@ export function OSRequestPage() {
   const [assigningId, setAssigningId] = useState<string | null>(null);
   const [activeCandidateRequestId, setActiveCandidateRequestId] = useState<string | null>(null);
   const [activeReviewRequestId, setActiveReviewRequestId] = useState<string | null>(null);
+  const [activeSkbnRequestId, setActiveSkbnRequestId] = useState<string | null>(null);
   const [candidateActionId, setCandidateActionId] = useState<string | null>(null);
+  const [uploadingSkbnCandidateId, setUploadingSkbnCandidateId] = useState<string | null>(null);
   const [candidateDecision, setCandidateDecision] = useState<{
     candidateId: string;
     decision: "APPROVED" | "REJECTED";
@@ -2229,6 +2235,25 @@ export function OSRequestPage() {
       setError(actionError instanceof Error ? actionError.message : "Gagal mengajukan aktivasi akun.");
     } finally {
       setCandidateActionId(null);
+    }
+  }
+
+  async function uploadCandidateSkbn(candidateId: string, file: File) {
+    setError(null);
+    setUploadingSkbnCandidateId(candidateId);
+    try {
+      if (!["application/pdf", "image/jpeg", "image/png"].includes(file.type)) {
+        throw new Error("SKBN harus berupa PDF, JPG, atau PNG.");
+      }
+      if (file.size === 0 || file.size > 5 * 1024 * 1024) {
+        throw new Error("Ukuran SKBN maksimal 5 MB.");
+      }
+      await sendJson(`/api/candidate/${candidateId}/skbn`, "PUT", { skbn: await readImage(file) });
+      requests.reload();
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Gagal mengunggah SKBN.");
+    } finally {
+      setUploadingSkbnCandidateId(null);
     }
   }
 
@@ -2327,6 +2352,11 @@ export function OSRequestPage() {
     && new Date(item.vendorNotifiedAt).getTime() >= Date.now() - 14 * 24 * 60 * 60 * 1000,
   );
   const activeReviewRequest = requests.data.find((item) => item.id === activeReviewRequestId);
+  const activeSkbnRequest = requests.data.find((item) => item.id === activeSkbnRequestId);
+  const activeSkbnSelectedCandidates = activeSkbnRequest?.candidates?.filter(
+    (candidate) => candidate.status === "TERPILIH",
+  ) || [];
+  const activeSkbnHasMissing = activeSkbnSelectedCandidates.some((candidate) => !candidate.hasSkbn);
   const acceptedCandidateCount = activeReviewRequest?.candidates?.filter(
     (candidate) => candidate.status === "TERPILIH" || candidate.status === "ACTIVATED",
   ).length || 0;
@@ -2386,9 +2416,15 @@ export function OSRequestPage() {
           <TableCell><StatusBadge status={getOSRequestStatus(item.status)} /></TableCell>
           {session?.user.role === "SM" && (
             <TableCell>
-              {(item.candidates?.length || 0) > 0
-                ? <Button size="sm" variant="outline" onClick={() => setActiveReviewRequestId(item.id)}>Lihat Detail</Button>
-                : "-"}
+              {getOSRequestStatus(item.status) === "OS_WAITING_SELECTION" ? (
+                <Button size="sm" variant="default" onClick={() => setActiveReviewRequestId(item.id)}>
+                  Tinjau Kandidat
+                </Button>
+              ) : (
+                <Button size="sm" variant="outline" onClick={() => setActiveReviewRequestId(item.id)}>
+                  Lihat Detail
+                </Button>
+              )}
             </TableCell>
           )}
           {session?.user.role === "VENDOR" && (
@@ -2410,11 +2446,28 @@ export function OSRequestPage() {
                   const candidates = item.candidates || [];
                   const hasUndecided = candidates.some((candidate) => candidate.status === "KANDIDAT");
                   const selected = candidates.filter((candidate) => candidate.status === "TERPILIH");
+                  const hasMissingSkbn = selected.some((candidate) => !candidate.hasSkbn);
                   if (selected.length > 0 && !hasUndecided) {
+                    if (hasMissingSkbn) {
+                      return (
+                        <Button size="sm" onClick={() => setActiveSkbnRequestId(item.id)}>
+                          Unggah SKBN
+                        </Button>
+                      );
+                    }
                     return (
-                        <Button size="sm" disabled={candidateActionId === item.id} onClick={() => requestCandidateAccounts(item.id)}>
-                        {candidateActionId === item.id ? "Mengirim..." : "Request akun"}
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          disabled={candidateActionId === item.id}
+                          onClick={() => requestCandidateAccounts(item.id)}
+                        >
+                          {candidateActionId === item.id ? "Mengirim..." : "Request akun"}
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => setActiveSkbnRequestId(item.id)}>
+                          Lihat SKBN
+                        </Button>
+                      </div>
                     );
                   }
                   return <Button size="sm" variant="outline" disabled>Menunggu Hasil Seleksi</Button>;
@@ -2688,9 +2741,15 @@ export function OSRequestPage() {
             </p>
           </DialogHeader>
           <DialogContent className="space-y-4">
-                {activeReviewRequest?.candidates?.map((candidate) => {
-              const missingFields = getMissingCandidateFields(candidate);
-              return (
+            {(!activeReviewRequest?.candidates || activeReviewRequest.candidates.length === 0) ? (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                <p>Belum ada data kandidat yang dikirim oleh vendor untuk permintaan ini.</p>
+                <p className="mt-1 text-xs">Status saat ini: <span className="font-medium text-foreground">{getOSRequestStatus(activeReviewRequest?.status || "")}</span></p>
+              </div>
+            ) : (
+              activeReviewRequest.candidates.map((candidate) => {
+                const missingFields = getMissingCandidateFields(candidate);
+                return (
               <div key={candidate.id} className="rounded-lg border p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="space-y-1">
@@ -2747,11 +2806,64 @@ export function OSRequestPage() {
                     ) : <StatusBadge status={candidate.status} />}
                   </div>
                 </div>
-                <div className="mt-3 flex gap-3">
-                  {candidate.fotoKtp && <a href={candidate.fotoKtp} target="_blank" rel="noreferrer"><img className="h-24 rounded border object-contain" src={candidate.fotoKtp} alt={`Foto KTP ${candidate.name}`} /></a>}
-                  {candidate.fotoSim && <a href={candidate.fotoSim} target="_blank" rel="noreferrer"><img className="h-24 rounded border object-contain" src={candidate.fotoSim} alt={`Foto SIM ${candidate.name}`} /></a>}
-                  {candidate.skck && <a className="self-center text-sm text-primary underline" href={candidate.skck} target="_blank" rel="noreferrer">Lihat SKCK</a>}
-                  {candidate.discReport && <a className="self-center text-sm text-primary underline" href={candidate.discReport} target="_blank" rel="noreferrer">Lihat laporan DISC</a>}
+                <div className="mt-3 flex flex-wrap gap-3">
+                  {candidate.fotoKtp && (
+                    <div className="space-y-1">
+                      <span className="text-[11px] font-medium text-muted-foreground">Foto KTP</span>
+                      <a href={candidate.fotoKtp} target="_blank" rel="noreferrer" className="block">
+                        <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={candidate.fotoKtp} alt={`Foto KTP ${candidate.name}`} />
+                      </a>
+                    </div>
+                  )}
+                  {candidate.fotoSim && (
+                    <div className="space-y-1">
+                      <span className="text-[11px] font-medium text-muted-foreground">Foto SIM</span>
+                      <a href={candidate.fotoSim} target="_blank" rel="noreferrer" className="block">
+                        <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={candidate.fotoSim} alt={`Foto SIM ${candidate.name}`} />
+                      </a>
+                    </div>
+                  )}
+                  {candidate.skck && (
+                    <div className="space-y-1">
+                      <span className="text-[11px] font-medium text-muted-foreground">SKCK</span>
+                      <a href={candidate.skck} target="_blank" rel="noreferrer" className="block">
+                        {candidate.skck.startsWith("data:application/pdf") ? (
+                          <div className="flex h-24 w-24 flex-col items-center justify-center rounded border bg-muted/40 p-2 text-center hover:bg-muted/70 transition">
+                            <FileText className="h-8 w-8 text-primary" />
+                            <span className="mt-1 text-[10px] font-medium leading-tight">SKCK (PDF)</span>
+                          </div>
+                        ) : (
+                          <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={candidate.skck} alt={`SKCK ${candidate.name}`} />
+                        )}
+                      </a>
+                    </div>
+                  )}
+                  {candidate.discReport && (
+                    <div className="space-y-1">
+                      <span className="text-[11px] font-medium text-muted-foreground">Laporan DISC</span>
+                      <a href={candidate.discReport} target="_blank" rel="noreferrer" className="block">
+                        {candidate.discReport.startsWith("data:application/pdf") ? (
+                          <div className="flex h-24 w-24 flex-col items-center justify-center rounded border bg-muted/40 p-2 text-center hover:bg-muted/70 transition">
+                            <FileText className="h-8 w-8 text-primary" />
+                            <span className="mt-1 text-[10px] font-medium leading-tight">DISC (PDF)</span>
+                          </div>
+                        ) : (
+                          <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={candidate.discReport} alt={`Laporan DISC ${candidate.name}`} />
+                        )}
+                      </a>
+                    </div>
+                  )}
+                  {candidate.hasSkbn && (
+                    <div className="space-y-1">
+                      <span className="text-[11px] font-medium text-muted-foreground">SKBN</span>
+                      <a href={`/api/candidate/${candidate.id}/skbn`} target="_blank" rel="noreferrer" className="block">
+                        <div className="flex h-24 w-24 flex-col items-center justify-center rounded border bg-muted/40 p-2 text-center hover:bg-muted/70 transition">
+                          <FileText className="h-8 w-8 text-primary" />
+                          <span className="mt-1 text-[10px] font-medium leading-tight text-primary underline">Lihat SKBN</span>
+                        </div>
+                      </a>
+                    </div>
+                  )}
                 </div>
                 {candidateDecision?.candidateId === candidate.id && (
                   <div className="mt-4 space-y-3 rounded-md bg-muted p-3">
@@ -2782,7 +2894,103 @@ export function OSRequestPage() {
                 )}
               </div>
               );
-            })}
+            })
+          )}
+          </DialogContent>
+        </Dialog>
+      )}
+      {session?.user.role === "VENDOR" && (
+        <Dialog
+          open={Boolean(activeSkbnRequestId)}
+          onOpenChange={(open) => { if (!open) setActiveSkbnRequestId(null); }}
+        >
+          <DialogHeader>
+            <DialogTitle>
+              Unggah Dokumen SKBN — {activeSkbnRequest?.posisi || "Request OS"}
+            </DialogTitle>
+            <p className="text-sm text-muted-foreground">
+              Request {activeSkbnRequest?.jumlah || 0} orang · {activeSkbnRequest?.penempatan || "-"}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              SKBN wajib diunggah untuk semua Mitra OS yang diterima sebelum mengajukan aktivasi akun (format: PDF, JPG, PNG, maks. 5 MB).
+            </p>
+          </DialogHeader>
+          <DialogContent className="space-y-4">
+            <FormError error={error} />
+            <div className="space-y-3">
+              {activeSkbnSelectedCandidates.map((candidate) => (
+                <div key={candidate.id} className="rounded-lg border p-3 space-y-2 text-sm">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-medium">{candidate.name}</p>
+                      <p className="text-xs text-muted-foreground">{candidate.email || "-"} · {candidate.phone || "-"}</p>
+                    </div>
+                    {candidate.hasSkbn ? (
+                      <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700 border border-emerald-200">
+                        SKBN Terunggah
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 border border-amber-200">
+                        Belum Diunggah
+                      </span>
+                    )}
+                  </div>
+                  {candidate.hasSkbn && (
+                    <div>
+                      <a
+                        className="text-xs text-primary underline font-medium"
+                        href={`/api/candidate/${candidate.id}/skbn`}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        Lihat dokumen SKBN
+                      </a>
+                    </div>
+                  )}
+                  <label className="block space-y-1">
+                    <span className="text-xs text-muted-foreground">
+                      {uploadingSkbnCandidateId === candidate.id
+                        ? "Mengunggah..."
+                        : candidate.hasSkbn
+                          ? "Ganti dokumen SKBN"
+                          : "Pilih file SKBN"}
+                    </span>
+                    <input
+                      className={fieldClass}
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                      disabled={uploadingSkbnCandidateId !== null || candidateActionId === activeSkbnRequestId}
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        event.target.value = "";
+                        if (file) void uploadCandidateSkbn(candidate.id, file);
+                      }}
+                    />
+                  </label>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t">
+              <Button type="button" variant="outline" onClick={() => setActiveSkbnRequestId(null)}>
+                Tutup
+              </Button>
+              <Button
+                type="button"
+                disabled={activeSkbnHasMissing || candidateActionId === activeSkbnRequestId}
+                onClick={async () => {
+                  if (activeSkbnRequestId) {
+                    await requestCandidateAccounts(activeSkbnRequestId);
+                    setActiveSkbnRequestId(null);
+                  }
+                }}
+              >
+                {candidateActionId === activeSkbnRequestId
+                  ? "Mengirim..."
+                  : activeSkbnHasMissing
+                    ? "Lengkapi SKBN untuk request akun"
+                    : "Request akun"}
+              </Button>
+            </div>
           </DialogContent>
         </Dialog>
       )}

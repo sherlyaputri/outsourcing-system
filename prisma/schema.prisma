@@ -181,6 +181,7 @@ model Candidate {
   noSim                     String?
   fotoSim                   String?         @db.LongText
   skck                      String?         @db.LongText
+  skbn                      String?         @db.LongText
   phone                     String?
   email                     String?
   alamat                    String?         @db.Text
