@@ -20,24 +20,51 @@ export async function GET(req: NextRequest) {
       where,
       select: {
         id: true,
+        vendorId: true,
         nomorInvoice: true,
         bulan: true,
         totalAmount: true,
         status: true,
         tanggalJatuhTempo: true,
+        catatan: true,
         dokumenNama: true,
         buktiTransferNama: true,
         createdAt: true,
-        vendor: { select: { name: true } },
+        vendor: { select: { id: true, name: true } },
       },
       orderBy: { createdAt: "desc" },
     });
 
-    return NextResponse.json(invoices.map((invoice) => ({
-      ...invoice,
-      hasDokumen: Boolean(invoice.dokumenNama),
-      hasBuktiTransfer: Boolean(invoice.buktiTransferNama),
-    })));
+    // Ambil data klaim untuk vendor/periode terkait guna menghitung potongan klaim otomatis
+    const claims = await prisma.claim.findMany({
+      where: session.user.role === "VENDOR" && session.user.vendorId ? { vendorId: session.user.vendorId } : {},
+      select: {
+        id: true,
+        vendorId: true,
+        bulan: true,
+        jenisClaim: true,
+        nominal: true,
+        status: true,
+        catatan: true,
+      },
+    });
+
+    return NextResponse.json(invoices.map((invoice) => {
+      const matchingClaims = claims.filter(
+        (c) => c.vendorId === invoice.vendorId && c.bulan === invoice.bulan && c.status !== "REJECTED"
+      );
+      const totalPotonganKlaim = matchingClaims.reduce((sum, c) => sum + (c.nominal || 0), 0);
+      const totalBersih = Math.max(0, invoice.totalAmount - totalPotonganKlaim);
+
+      return {
+        ...invoice,
+        hasDokumen: Boolean(invoice.dokumenNama),
+        hasBuktiTransfer: Boolean(invoice.buktiTransferNama),
+        totalPotonganKlaim,
+        totalBersih,
+        claims: matchingClaims,
+      };
+    }));
   } catch (error) {
     console.error("Invoice GET error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });

@@ -8,8 +8,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { FileText, User, Mail, Phone, MapPin, Briefcase, CreditCard, Shield, ExternalLink, Calendar, Edit, Eye, Check } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { FileText, User, Mail, Phone, MapPin, Briefcase, CreditCard, Shield, ExternalLink, Calendar, Edit, Eye, Check, Upload, Search, RotateCcw } from "lucide-react";
+import { cn, formatCurrency, formatDate } from "@/lib/utils";
 
 interface ApiState<T> {
   data: T;
@@ -234,13 +234,17 @@ interface Invoice {
   nomorInvoice: string;
   bulan: string;
   totalAmount: number;
+  totalPotonganKlaim?: number;
+  totalBersih?: number;
+  claims?: Array<{ id: string; jenisClaim: string; nominal: number; catatan?: string | null }>;
   status: string;
   hasDokumen: boolean;
   dokumenNama?: string | null;
   hasBuktiTransfer: boolean;
   buktiTransferNama?: string | null;
   tanggalJatuhTempo?: string | null;
-  vendor?: { name: string };
+  catatan?: string | null;
+  vendor?: { id?: string; name: string };
 }
 
 interface OSRequest {
@@ -2799,12 +2803,32 @@ export function ClaimsPage() {
   );
 }
 
+function formatInvoiceMonth(bulan: string): string {
+  if (!bulan) return "-";
+  const parts = bulan.split("-");
+  if (parts.length < 2) return bulan;
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  if (isNaN(year) || isNaN(month)) return bulan;
+  const date = new Date(year, month - 1, 1);
+  return date.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+}
+
 export function InvoicesPage() {
   const { data: session } = useSession();
   const invoices = useApiData<Invoice[]>("/api/invoice", []);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
+  const [proofTargetInvoice, setProofTargetInvoice] = useState<Invoice | null>(null);
   const [uploadingInvoiceId, setUploadingInvoiceId] = useState<string | null>(null);
+
+  // Filter states
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterStatus, setFilterStatus] = useState("ALL");
+  const [filterBulan, setFilterBulan] = useState("");
+  const [filterStartDate, setFilterStartDate] = useState("");
+  const [filterEndDate, setFilterEndDate] = useState("");
 
   async function readInvoiceDocument(file: File) {
     return new Promise<string>((resolve, reject) => {
@@ -2866,7 +2890,7 @@ export function InvoicesPage() {
         dokumen: await readInvoiceDocument(file),
         dokumenNama: file.name,
       });
-      formElement.reset();
+      setUploadModalOpen(false);
       invoices.reload();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Gagal mengirim invoice.");
@@ -2875,56 +2899,285 @@ export function InvoicesPage() {
     }
   }
 
+  const filteredInvoices = invoices.data.filter((item) => {
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const matchNomor = item.nomorInvoice.toLowerCase().includes(q);
+      const matchVendor = (item.vendor?.name || "").toLowerCase().includes(q);
+      if (!matchNomor && !matchVendor) return false;
+    }
+    if (filterStatus !== "ALL" && item.status !== filterStatus) {
+      return false;
+    }
+    if (filterBulan && item.bulan !== filterBulan) {
+      return false;
+    }
+    if (filterStartDate) {
+      const itemDate = item.createdAt ? new Date(item.createdAt).toISOString().split("T")[0] : "";
+      if (itemDate && itemDate < filterStartDate) return false;
+    }
+    if (filterEndDate) {
+      const itemDate = item.createdAt ? new Date(item.createdAt).toISOString().split("T")[0] : "";
+      if (itemDate && itemDate > filterEndDate) return false;
+    }
+    return true;
+  });
+
+  const hasActiveFilter = Boolean(searchQuery || filterStatus !== "ALL" || filterBulan || filterStartDate || filterEndDate);
+
+  function resetFilters() {
+    setSearchQuery("");
+    setFilterStatus("ALL");
+    setFilterBulan("");
+    setFilterStartDate("");
+    setFilterEndDate("");
+  }
+
+  const totalInvoicesCount = invoices.data.length;
+  const pendingInvoicesCount = invoices.data.filter((i) => i.status === "SUBMITTED").length;
+  const paidInvoicesCount = invoices.data.filter((i) => i.status === "PAID").length;
+  const totalNominalTagihan = invoices.data.reduce((sum, i) => sum + (i.totalAmount || 0), 0);
+  const totalPotonganKlaimSum = invoices.data.reduce((sum, i) => sum + (i.totalPotonganKlaim || 0), 0);
+  const totalBersihSum = invoices.data.reduce((sum, i) => sum + (i.totalBersih ?? i.totalAmount), 0);
+
   return (
-    <FeaturePage title="Invoice" description="Lihat invoice vendor atau kirim invoice baru." roles={["VENDOR", "VM"]}>
+    <FeaturePage
+      title="Invoice"
+      description="Kelola dan pantau daftar pengajuan invoice vendor serta pelunasan tagihan oleh VM."
+      roles={["VENDOR", "VM"]}
+    >
       <FormError error={error} />
-      {session?.user.role === "VENDOR" && (
-        <Card><CardHeader><CardTitle className="text-lg">Buat Invoice</CardTitle></CardHeader><CardContent>
-          <form onSubmit={submit} className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-1 text-sm">Bulan<RequiredMark /><input className={fieldClass} type="month" name="bulan" required /></label>
-            <label className="space-y-1 text-sm">Total tagihan<RequiredMark /><input className={fieldClass} type="number" min="0" step="any" name="totalAmount" required /></label>
-            <label className="space-y-1 text-sm">Jatuh tempo<OptionalMark /><input className={fieldClass} type="date" name="tanggalJatuhTempo" /></label>
-            <label className="space-y-1 text-sm">Catatan<OptionalMark /><input className={fieldClass} name="catatan" /></label>
-            <label className="space-y-1 text-sm md:col-span-2">File invoice (PDF/JPG/PNG, maks. 5 MB)<RequiredMark /><input className={fieldClass} type="file" name="dokumen" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required /></label>
-            <FormError error={error} />
-            <Button type="submit" disabled={saving}>{saving ? "Mengunggah..." : "Upload Invoice"}</Button>
-          </form>
-        </CardContent></Card>
-      )}
-      <Card><CardContent className="p-0">
-        <LoadingError loading={invoices.loading} error={invoices.error} empty={!invoices.data.length} />
-        {!invoices.loading && !invoices.error && invoices.data.length > 0 && (
-          <DataTable headers={["Tanggal", "Nomor", "Bulan", "Vendor", "Total", "Jatuh Tempo", "Dokumen", "Bukti Transfer", "Status"]}>
-            {invoices.data.map((item) => (
+
+      {/* Ringkasan Status Invoice */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div className="bg-card rounded-xl border p-4 shadow-xs space-y-1">
+          <p className="text-xs text-muted-foreground font-medium">Total Pengajuan</p>
+          <p className="text-2xl font-bold text-foreground">{totalInvoicesCount}</p>
+        </div>
+        <div className="bg-card rounded-xl border p-4 shadow-xs space-y-1">
+          <p className="text-xs text-blue-600 font-medium">Menunggu Pembayaran</p>
+          <p className="text-2xl font-bold text-blue-600">{pendingInvoicesCount}</p>
+        </div>
+        <div className="bg-card rounded-xl border p-4 shadow-xs space-y-1">
+          <p className="text-xs text-green-600 font-medium">Sudah Dibayar</p>
+          <p className="text-2xl font-bold text-green-600">{paidInvoicesCount}</p>
+        </div>
+        <div className="bg-card rounded-xl border p-4 shadow-xs space-y-1">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-primary font-medium">Total Dibayarkan (Netto)</p>
+            {totalPotonganKlaimSum > 0 && (
+              <span className="text-[10px] text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200" title={`Total klaim dipotong: ${formatCurrency(totalPotonganKlaimSum)}`}>
+                Klaim: -{formatCurrency(totalPotonganKlaimSum)}
+              </span>
+            )}
+          </div>
+          <p className="text-lg sm:text-xl font-bold text-primary truncate" title={formatCurrency(totalBersihSum)}>
+            {formatCurrency(totalBersihSum)}
+          </p>
+        </div>
+      </div>
+
+      {/* Toolbar: Filter & Tombol Upload Invoice */}
+      <div className="flex flex-col gap-3 bg-card p-4 rounded-xl border shadow-xs">
+        <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
+          <div className="flex flex-wrap items-center gap-2.5 flex-1">
+            {/* Pencarian */}
+            <div className="relative min-w-44 sm:min-w-56 flex-1 sm:flex-initial">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Cari nomor invoice / vendor..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className={cn(fieldClass, "pl-9 text-xs h-9")}
+              />
+            </div>
+
+            {/* Filter Kategori Status: SUBMITTED (Menunggu Pembayaran), PAID (Sudah Dibayar), REJECTED (Ditolak) */}
+            <div className="min-w-40">
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className={cn(fieldClass, "text-xs h-9")}
+              >
+                <option value="ALL">Semua Status</option>
+                <option value="SUBMITTED">Menunggu Pembayaran</option>
+                <option value="PAID">Sudah Dibayar</option>
+                <option value="REJECTED">Ditolak / Dibatalkan</option>
+              </select>
+            </div>
+
+            {/* Filter Bulan Tagihan */}
+            <div className="min-w-36">
+              <input
+                type="month"
+                value={filterBulan}
+                onChange={(e) => setFilterBulan(e.target.value)}
+                className={cn(fieldClass, "text-xs h-9")}
+                title="Filter bulan tagihan"
+              />
+            </div>
+
+            {/* Filter Rentang Tanggal Pengajuan */}
+            <div className="flex items-center gap-1.5">
+              <input
+                type="date"
+                value={filterStartDate}
+                onChange={(e) => setFilterStartDate(e.target.value)}
+                className={cn(fieldClass, "text-xs h-9 w-36")}
+                title="Tanggal pengajuan mulai"
+              />
+              <span className="text-xs text-muted-foreground">-</span>
+              <input
+                type="date"
+                value={filterEndDate}
+                onChange={(e) => setFilterEndDate(e.target.value)}
+                className={cn(fieldClass, "text-xs h-9 w-36")}
+                title="Tanggal pengajuan selesai"
+              />
+            </div>
+
+            {/* Tombol Reset Filter */}
+            {hasActiveFilter && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={resetFilters}
+                className="text-xs h-9 text-muted-foreground hover:text-foreground flex items-center gap-1.5"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Reset
+              </Button>
+            )}
+          </div>
+
+          {/* Tombol Upload Invoice di sebelah kanan */}
+          {session?.user.role === "VENDOR" && (
+            <Button
+              onClick={() => { setError(null); setUploadModalOpen(true); }}
+              className="flex items-center gap-2 text-xs h-9 px-4 shrink-0 shadow-xs"
+            >
+              <Upload className="h-4 w-4" />
+              Upload Invoice
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Tabel Daftar Pengajuan Invoice */}
+      <Card><CardContent className="overflow-x-auto p-0">
+        <LoadingError loading={invoices.loading} error={invoices.error} empty={!filteredInvoices.length} />
+        {!invoices.loading && !invoices.error && filteredInvoices.length > 0 && (
+          <DataTable headers={[
+            "Tanggal",
+            "Nomor Invoice",
+            "Bulan Tagihan",
+            ...(session?.user.role !== "VENDOR" ? ["Vendor"] : []),
+            "Total Tagihan",
+            "Potongan Klaim",
+            "Total Dibayarkan",
+            "Jatuh Tempo",
+            "Dokumen Invoice",
+            "Bukti Transfer",
+            "Status",
+          ]}>
+            {filteredInvoices.map((item) => (
               <TableRow key={item.id}>
-                <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString("id-ID") : "-"}</TableCell>
-                <TableCell>{item.nomorInvoice}</TableCell>
-                <TableCell>{item.bulan}</TableCell>
-                <TableCell>{item.vendor?.name || "-"}</TableCell>
-                <TableCell>{item.totalAmount.toLocaleString("id-ID")}</TableCell>
-                <TableCell>{item.tanggalJatuhTempo ? new Date(item.tanggalJatuhTempo).toLocaleDateString("id-ID") : "-"}</TableCell>
-                <TableCell>{item.hasDokumen ? <a className="text-primary underline" href={`/api/invoice/${item.id}`} target="_blank" rel="noreferrer">{item.dokumenNama || "Unduh"}</a> : "-"}</TableCell>
-                <TableCell className="min-w-52">
+                <TableCell>
+                  <span className="text-xs text-muted-foreground">
+                    {item.createdAt ? formatDate(item.createdAt) : "-"}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <span className="font-mono font-semibold text-xs text-primary">
+                    {item.nomorInvoice}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <span className="text-xs font-medium text-foreground">
+                    {formatInvoiceMonth(item.bulan)}
+                  </span>
+                </TableCell>
+                {session?.user.role !== "VENDOR" && (
+                  <TableCell>
+                    <span className="text-xs font-medium text-foreground">
+                      {item.vendor?.name || "-"}
+                    </span>
+                  </TableCell>
+                )}
+                <TableCell>
+                  <span className="text-xs font-medium text-foreground">
+                    {formatCurrency(item.totalAmount)}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  {item.totalPotonganKlaim && item.totalPotonganKlaim > 0 ? (
+                    <div className="space-y-0.5 text-xs">
+                      <span className="font-semibold text-rose-600 block">
+                        - {formatCurrency(item.totalPotonganKlaim)}
+                      </span>
+                      {item.claims && item.claims.length > 0 && (
+                        <span
+                          className="text-[10px] text-muted-foreground block truncate max-w-[130px] cursor-help"
+                          title={item.claims.map((c) => `${c.jenisClaim}: ${formatCurrency(c.nominal)}`).join(", ")}
+                        >
+                          {item.claims.length} klaim ({item.claims.map((c) => c.jenisClaim).join(", ")})
+                        </span>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">-</span>
+                  )}
+                </TableCell>
+                <TableCell>
+                  <span className="text-xs font-bold text-foreground">
+                    {formatCurrency(item.totalBersih ?? item.totalAmount)}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <span className="text-xs text-muted-foreground">
+                    {item.tanggalJatuhTempo ? formatDate(item.tanggalJatuhTempo) : "-"}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  {item.hasDokumen ? (
+                    <a
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs bg-muted hover:bg-muted/80 text-foreground border transition-colors font-medium"
+                      href={`/api/invoice/${item.id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <FileText className="h-3.5 w-3.5 text-primary" />
+                      <span className="truncate max-w-[120px]">{item.dokumenNama || "Lihat File"}</span>
+                      <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                    </a>
+                  ) : "-"}
+                </TableCell>
+                <TableCell className="min-w-44">
                   {item.hasBuktiTransfer ? (
-                    <a className="text-primary underline" href={`/api/invoice/${item.id}?type=transfer`} target="_blank" rel="noreferrer">
-                      {item.buktiTransferNama || "Lihat bukti"}
+                    <a
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs bg-green-50 text-green-700 hover:bg-green-100 border border-green-200 transition-colors font-medium"
+                      href={`/api/invoice/${item.id}?type=transfer`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <Check className="h-3.5 w-3.5 text-green-600" />
+                      <span className="truncate max-w-[120px]">{item.buktiTransferNama || "Lihat Bukti"}</span>
+                      <ExternalLink className="h-3 w-3 text-green-600" />
                     </a>
                   ) : session?.user.role === "VM" ? (
-                    <label className="block space-y-1 text-xs">
-                      {uploadingInvoiceId === item.id ? "Mengunggah..." : "Upload bukti transfer"}
-                      <input
-                        className="block w-full text-xs"
-                        type="file"
-                        accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
-                        disabled={Boolean(uploadingInvoiceId) || item.status === "PAID"}
-                        onChange={(event) => {
-                          const file = event.target.files?.[0];
-                          if (file) void uploadPaymentProof(item.id, file);
-                          event.target.value = "";
-                        }}
-                      />
-                    </label>
-                  ) : "-"}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-7 gap-1 text-primary border-primary/30 hover:bg-primary/10"
+                      onClick={() => setProofTargetInvoice(item)}
+                    >
+                      <Upload className="h-3 w-3" />
+                      Upload Bukti
+                    </Button>
+                  ) : (
+                    <span className="text-xs text-muted-foreground italic">Belum ada</span>
+                  )}
                 </TableCell>
                 <TableCell><StatusBadge status={item.status} /></TableCell>
               </TableRow>
@@ -2932,6 +3185,152 @@ export function InvoicesPage() {
           </DataTable>
         )}
       </CardContent></Card>
+
+      {/* Modal Upload Invoice Baru */}
+      {uploadModalOpen && (
+        <Dialog open onOpenChange={(open) => { if (!open && !saving) setUploadModalOpen(false); }} className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+              <Upload className="h-5 w-5 text-primary" />
+              Upload Invoice Baru
+            </DialogTitle>
+          </DialogHeader>
+          <DialogContent>
+            <form onSubmit={submit} className="space-y-4">
+              <div className="p-3 bg-blue-50/70 dark:bg-blue-950/20 rounded-lg border border-blue-200/70 text-xs text-blue-900 dark:text-blue-200 space-y-1">
+                <p className="font-semibold">Alur Pembayaran Invoice:</p>
+                <p className="leading-relaxed text-[11px]">
+                  Invoice yang diajukan akan berstatus <strong>Menunggu Pembayaran</strong> untuk diproses oleh tim VM. Apabila terdapat klaim operasional pada bulan tagihan ini di <em>Daftar Klaim</em>, nominal tagihan akan otomatis disesuaikan dengan potongan klaim tersebut.
+                </p>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="space-y-1 text-sm">
+                  Bulan Tagihan<RequiredMark />
+                  <input className={fieldClass} type="month" name="bulan" required />
+                </label>
+                <label className="space-y-1 text-sm">
+                  Total Tagihan (Rp)<RequiredMark />
+                  <input className={fieldClass} type="number" min="0" step="any" name="totalAmount" placeholder="Contoh: 15000000" required />
+                </label>
+                <label className="space-y-1 text-sm">
+                  Jatuh Tempo<OptionalMark />
+                  <input className={fieldClass} type="date" name="tanggalJatuhTempo" />
+                </label>
+                <label className="space-y-1 text-sm">
+                  Catatan<OptionalMark />
+                  <input className={fieldClass} name="catatan" placeholder="Catatan invoice jika ada" />
+                </label>
+              </div>
+
+              <div className="pt-2 border-t">
+                <DocumentFileInput
+                  name="dokumen"
+                  label="File Dokumen Invoice (PDF/JPG/PNG, maks. 5 MB)"
+                  accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                  required
+                  helpText="Unggah scan dokumen invoice resmi dari Vendor."
+                />
+              </div>
+
+              <FormError error={error} />
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <Button type="button" variant="outline" disabled={saving} onClick={() => setUploadModalOpen(false)}>
+                  Batal
+                </Button>
+                <Button type="submit" disabled={saving} className="gap-2">
+                  <Upload className="h-4 w-4" />
+                  {saving ? "Mengunggah..." : "Upload Invoice"}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Modal Upload Bukti Transfer untuk VM */}
+      {proofTargetInvoice && (
+        <Dialog open onOpenChange={(open) => { if (!open && !uploadingInvoiceId) setProofTargetInvoice(null); }} className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-bold">
+              <Check className="h-5 w-5 text-green-600" />
+              Upload Bukti Pembayaran
+            </DialogTitle>
+          </DialogHeader>
+          <DialogContent>
+            <form
+              onSubmit={async (e) => {
+                e.preventDefault();
+                const form = new FormData(e.currentTarget);
+                const file = form.get("buktiTransfer");
+                if (file instanceof File && file.size > 0) {
+                  await uploadPaymentProof(proofTargetInvoice.id, file);
+                  setProofTargetInvoice(null);
+                }
+              }}
+              className="space-y-4"
+            >
+              <div className="p-3 bg-muted/40 rounded-lg text-xs space-y-2 border">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Nomor Invoice:</span>
+                  <strong className="font-mono text-primary">{proofTargetInvoice.nomorInvoice}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Vendor:</span>
+                  <strong>{proofTargetInvoice.vendor?.name || "-"}</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Bulan Periode:</span>
+                  <strong>{formatInvoiceMonth(proofTargetInvoice.bulan)}</strong>
+                </div>
+
+                <div className="pt-2 border-t space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Total Tagihan Awal:</span>
+                    <span className="font-medium">{formatCurrency(proofTargetInvoice.totalAmount)}</span>
+                  </div>
+                  {proofTargetInvoice.totalPotonganKlaim && proofTargetInvoice.totalPotonganKlaim > 0 ? (
+                    <div className="flex justify-between text-rose-600 font-semibold">
+                      <span>Potongan Klaim ({proofTargetInvoice.claims?.length || 0} klaim):</span>
+                      <span>- {formatCurrency(proofTargetInvoice.totalPotonganKlaim)}</span>
+                    </div>
+                  ) : (
+                    <div className="flex justify-between text-muted-foreground">
+                      <span>Potongan Klaim:</span>
+                      <span>Tidak ada klaim (Rp 0)</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-sm font-bold pt-1.5 border-t text-foreground">
+                    <span>Total Bersih Ditransfer:</span>
+                    <span className="text-primary text-base">
+                      {formatCurrency(proofTargetInvoice.totalBersih ?? proofTargetInvoice.totalAmount)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <DocumentFileInput
+                name="buktiTransfer"
+                label="File Bukti Transfer (PDF/JPG/PNG, maks. 5 MB)"
+                accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                required
+                helpText="Unggah bukti transfer pembayaran invoice yang telah dibayarkan VM."
+              />
+
+              <FormError error={error} />
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <Button type="button" variant="outline" disabled={Boolean(uploadingInvoiceId)} onClick={() => setProofTargetInvoice(null)}>
+                  Batal
+                </Button>
+                <Button type="submit" disabled={Boolean(uploadingInvoiceId)} className="gap-2">
+                  <Upload className="h-4 w-4" />
+                  {uploadingInvoiceId ? "Mengunggah..." : "Simpan Bukti Pembayaran"}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
     </FeaturePage>
   );
 }
