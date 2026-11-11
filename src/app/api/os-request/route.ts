@@ -84,7 +84,7 @@ export async function GET(req: NextRequest) {
       candidates: request.candidates.map((candidate) => {
         if ("skbn" in candidate) {
           const { skbn, ...candidateSummary } = candidate;
-          return { ...candidateSummary, hasSkbn: Boolean(skbn) };
+          return { ...candidateSummary, hasSkbn: Boolean(skbn), skbnIsImage: Boolean(skbn && /^data:image\//.test(skbn)) };
         }
         return candidate;
       }),

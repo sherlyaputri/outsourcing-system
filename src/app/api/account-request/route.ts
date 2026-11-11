@@ -89,6 +89,7 @@ export async function GET(req: NextRequest) {
           candidate: {
             ...candidateSummary,
             hasSkbn: Boolean(skbn),
+            skbnIsImage: Boolean(skbn && /^data:image\//.test(skbn)),
           },
         };
       }
