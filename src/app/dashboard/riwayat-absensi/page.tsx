@@ -26,7 +26,7 @@ interface AttendanceRecord {
   longitude?: number | null;
   latitudeCheckOut?: number | null;
   longitudeCheckOut?: number | null;
-  user?: { name: string; mitraProfile?: { waktuKerja?: string | null } | null };
+  user?: { id?: string; name: string; mitraProfile?: { waktuKerja?: string | null; idMitraOs?: string | null; status?: string | null; posisi?: string | null; penempatan?: string | null } | null };
 }
 
 function LocationLink({ latitude, longitude, label }: {
@@ -45,11 +45,79 @@ function LocationLink({ latitude, longitude, label }: {
   );
 }
 
+function AttendanceMatrix({ records, month, filter, sort, onSort, onPhoto }: {
+  records: AttendanceRecord[];
+  month: string;
+  filter: string;
+  sort: { column: string; direction: "asc" | "desc" } | null;
+  onSort: (column: string) => void;
+  onPhoto: (photo: { src: string; title: string }) => void;
+}) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  const dayCount = new Date(year, monthNumber, 0).getDate();
+  const grouped = new Map<string, { name: string; idMitraOs: string; status: string; role: string; office: string; days: Map<number, AttendanceRecord>; all: AttendanceRecord[] }>();
+  for (const record of records) {
+    const key = record.user?.id || record.user?.name || record.id;
+    const profile = record.user?.mitraProfile;
+    if (!grouped.has(key)) grouped.set(key, {
+      name: record.user?.name || "-", idMitraOs: profile?.idMitraOs || "-",
+      status: profile?.status === "ACTIVE" ? "Aktif" : profile?.status || "-",
+      role: profile?.posisi || "-",
+      office: profile?.penempatan?.toLocaleLowerCase("id-ID") === "kantor1" ? "Kantor1 (Rempoa)" : profile?.penempatan || "-",
+      days: new Map(), all: [],
+    });
+    const row = grouped.get(key)!;
+    row.days.set(new Date(record.date).getDate(), record);
+    row.all.push(record);
+  }
+  let rows = [...grouped.values()];
+  if (sort) {
+    rows.sort((a, b) => {
+      const value = (row: typeof rows[number]) => {
+        if (sort.column === "total") return [...row.days.values()].filter((item) => item.type === "HADIR").length;
+        return ({ name: row.name, id: row.idMitraOs, status: row.status, role: row.role, office: row.office } as Record<string, string>)[sort.column]
+          || (sort.column === "checkIn" ? row.all.find((item) => item.checkIn)?.checkIn || "" : sort.column === "checkOut" ? [...row.all].reverse().find((item) => item.checkOut)?.checkOut || "" : "");
+      };
+      const first = value(a); const second = value(b);
+      const compared = typeof first === "number" && typeof second === "number" ? first - second : String(first).localeCompare(String(second), "id", { numeric: true, sensitivity: "base" });
+      return sort.direction === "asc" ? compared : -compared;
+    });
+  }
+  const headers: [string, string][] = [["name", "Nama"], ["id", "ID Mitra"], ["status", "Status"], ["role", "Peran"], ["office", "Kode Kantor"], ["checkIn", "Jam Masuk"], ["checkOut", "Jam Keluar"], ["photo", "Foto"]];
+  return <Table><TableHeader><TableRow>
+    {headers.map(([key, label]) => <TableHead key={key}><button type="button" className="text-left" onClick={() => onSort(key)}>{label} {sort?.column === key ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</button></TableHead>)}
+    {Array.from({ length: dayCount }, (_, index) => <TableHead key={index + 1} className="min-w-9 text-center">{index + 1}</TableHead>)}
+    <TableHead><button type="button" onClick={() => onSort("total")}>Total Hadir {sort?.column === "total" ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}</button></TableHead>
+  </TableRow></TableHeader><TableBody>
+    {rows.map((row) => {
+      const query = filter.trim().toLocaleLowerCase("id-ID");
+      if (query && ![row.name, row.idMitraOs, row.status, row.role, row.office].some((value) => value.toLocaleLowerCase("id-ID").includes(query))) return null;
+      const latest = [...row.all].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())[0];
+      const total = [...row.days.values()].filter((item) => item.type === "HADIR").length;
+      return <TableRow key={row.idMitraOs + row.name}>
+        <TableCell className="font-medium">{row.name}</TableCell><TableCell>{row.idMitraOs}</TableCell><TableCell>{row.status}</TableCell><TableCell>{row.role}</TableCell><TableCell>{row.office}</TableCell>
+        <TableCell>{latest?.checkIn ? new Date(latest.checkIn).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "-"}</TableCell>
+        <TableCell>{latest?.checkOut ? new Date(latest.checkOut).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" }) : "-"}</TableCell>
+        <TableCell><div className="flex gap-1">{latest?.fotoCheckIn && <button type="button" onClick={() => onPhoto({ src: latest.fotoCheckIn!, title: `Foto masuk ${row.name}` })}><img className="h-10 w-10 rounded border object-cover" src={latest.fotoCheckIn} alt="Foto masuk" /></button>}{latest?.fotoCheckOut && <button type="button" onClick={() => onPhoto({ src: latest.fotoCheckOut!, title: `Foto keluar ${row.name}` })}><img className="h-10 w-10 rounded border object-cover" src={latest.fotoCheckOut} alt="Foto keluar" /></button>}</div></TableCell>
+        {Array.from({ length: dayCount }, (_, index) => {
+          const attendance = row.days.get(index + 1);
+          const shiftStart = attendance?.checkIn ? getShiftStartAt(new Date(attendance.checkIn), attendance.user?.mitraProfile?.waktuKerja) : null;
+          const late = attendance?.type === "HADIR" && Boolean(shiftStart && new Date(attendance!.checkIn!) > shiftStart);
+          const value = !attendance ? "-" : attendance.type === "HADIR" ? late ? "HT" : "H" : attendance.type;
+          return <TableCell key={index + 1} className={`text-center ${late ? "font-semibold text-amber-700" : ""}`}>{value}</TableCell>;
+        })}
+        <TableCell className="text-center font-semibold">{total}</TableCell>
+      </TableRow>;
+    })}
+  </TableBody></Table>;
+}
+
 export default function RiwayatAbsensiPage() {
   const { data: session } = useSession();
   const [attendances, setAttendances] = useState<AttendanceRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedPhoto, setSelectedPhoto] = useState<{ src: string; title: string } | null>(null);
+  const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<{ column: string; direction: "asc" | "desc" } | null>(null);
   const [month, setMonth] = useState(() => {
     const now = new Date();
@@ -77,8 +145,13 @@ export default function RiwayatAbsensiPage() {
     { key: "status", label: "Status" },
     { key: "note", label: "Catatan" },
   ];
+  const filteredAttendances = attendances.filter((attendance) => {
+    const query = filter.trim().toLocaleLowerCase("id-ID");
+    return !query || [attendance.user?.name, attendance.type, attendance.note, attendance.date]
+      .some((value) => String(value || "").toLocaleLowerCase("id-ID").includes(query));
+  });
   const sortedAttendances = sort
-    ? [...attendances].sort((left, right) => {
+    ? [...filteredAttendances].sort((left, right) => {
         const getValue = (attendance: AttendanceRecord): string | number => {
           switch (sort.column) {
             case "name": return attendance.user?.name || "";
@@ -105,7 +178,7 @@ export default function RiwayatAbsensiPage() {
           : String(leftValue).localeCompare(String(rightValue), "id", { numeric: true, sensitivity: "base" });
         return sort.direction === "asc" ? comparison : -comparison;
       })
-    : attendances;
+    : filteredAttendances;
 
   return (
     <DashboardLayout allowedRoles={["MITRA", "VENDOR", "VM"]}>
@@ -120,6 +193,7 @@ export default function RiwayatAbsensiPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            <Input aria-label="Filter riwayat absensi" placeholder="Cari nama/status/catatan" value={filter} onChange={(event) => setFilter(event.target.value)} className="w-56" />
             <Label>Bulan:</Label>
             <Input
               type="month"
@@ -140,8 +214,19 @@ export default function RiwayatAbsensiPage() {
                 description="Data absensi untuk bulan ini belum tersedia."
                 icon={<History size={32} className="text-muted-foreground" />}
               />
-            ) : (
-              <Table>
+            ) : session?.user.role !== "MITRA" ? (
+                <AttendanceMatrix
+                  records={attendances}
+                  month={month}
+                  filter={filter}
+                  sort={sort}
+                  onSort={(column) => setSort((current) => ({
+                    column,
+                    direction: current?.column === column && current.direction === "asc" ? "desc" : "asc",
+                  }))}
+                  onPhoto={setSelectedPhoto}
+                />
+              ) : <Table>
                 <TableHeader>
                   <TableRow>
                     {columns.map(({ key, label }) => (
@@ -243,8 +328,7 @@ export default function RiwayatAbsensiPage() {
                     })()
                   ))}
                 </TableBody>
-              </Table>
-            )}
+              </Table>}
           </CardContent>
         </Card>
       </div>

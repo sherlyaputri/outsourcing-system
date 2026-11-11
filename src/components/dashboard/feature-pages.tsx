@@ -101,6 +101,7 @@ interface OSCandidate {
   status: string;
   alasanKeputusan?: string | null;
   hasSkbn?: boolean;
+  skbnIsImage?: boolean;
   accountRequest?: { status: string } | null;
 }
 
@@ -130,6 +131,7 @@ interface AccountRequest {
   email: string;
   phone?: string | null;
   status: string;
+  createdAt?: string;
   catatan?: string | null;
   requester?: { name: string; role: string };
   handler?: { name: string; role: string } | null;
@@ -142,6 +144,7 @@ interface AccountRequest {
     fotoSim?: string | null;
     skck?: string | null;
     hasSkbn?: boolean;
+    skbnIsImage?: boolean;
     alamat?: string | null;
     kelurahan?: string | null;
     kecamatan?: string | null;
@@ -214,6 +217,7 @@ interface Region {
 
 interface Claim {
   id: string;
+  createdAt?: string;
   bulan: string;
   jenisClaim: string;
   jumlahMitra: number;
@@ -226,6 +230,7 @@ interface Claim {
 
 interface Invoice {
   id: string;
+  createdAt?: string;
   nomorInvoice: string;
   bulan: string;
   totalAmount: number;
@@ -275,6 +280,7 @@ function getOSRequestStatus(status: string) {
 
 interface Approval {
   id: string;
+  createdAt?: string;
   status: string;
   level: string;
   catatan?: string | null;
@@ -485,6 +491,19 @@ export function MitraManagementPage() {
                 <TableCell>{mitra.mitraProfile?.waktuKerja || "Belum diatur"}</TableCell>
                 {(session?.user.role === "VENDOR" || session?.user.role === "VM") && (
                   <TableCell>
+                    {mitra.initialPassword ? (
+                      <details>
+                        <summary className="cursor-pointer text-primary">Lihat kredensial</summary>
+                        <div className="mt-1 space-y-1 text-xs">
+                          <p>Username: {mitra.email}</p>
+                          <p>Password awal: <code>{mitra.initialPassword}</code></p>
+                        </div>
+                      </details>
+                    ) : "Tidak tersedia"}
+                  </TableCell>
+                )}
+                {(session?.user.role === "VENDOR" || session?.user.role === "VM") && (
+                  <TableCell>
                     {mitra.mitraProfile?.dokumenDeadlineAt ? (() => {
                       const requiredDocuments = ["Ijazah", "Kartu Keluarga", "Foto Seluruh Badan", "SKBN"];
                       const uploadedNames = new Set(mitra.mitraProfile.documents?.map((document) => document.name) || []);
@@ -496,19 +515,6 @@ export function MitraManagementPage() {
                         </div>
                       );
                     })() : "-"}
-                  </TableCell>
-                )}
-                {(session?.user.role === "VENDOR" || session?.user.role === "VM") && (
-                  <TableCell>
-                    {mitra.initialPassword ? (
-                      <details>
-                        <summary className="cursor-pointer text-primary">Lihat kredensial</summary>
-                        <div className="mt-1 space-y-1 text-xs">
-                          <p>Username: {mitra.email}</p>
-                          <p>Password awal: <code>{mitra.initialPassword}</code></p>
-                        </div>
-                      </details>
-                    ) : "Tidak tersedia"}
                   </TableCell>
                 )}
                 <TableCell>
@@ -2663,9 +2669,10 @@ export function AccountApprovalPage() {
       <Card><CardContent className="p-0">
         <LoadingError loading={requests.loading} error={requests.error} empty={!requests.data.some((item) => item.status === "PENDING")} />
         {!requests.loading && !requests.error && requests.data.filter((item) => item.status === "PENDING").length > 0 && (
-          <DataTable headers={["Nama", "Email", "Telepon", "Vendor/Pemohon", "Request OS", "Status", "Aksi"]}>
+          <DataTable headers={["Tanggal", "Nama", "Email", "Telepon", "Vendor/Pemohon", "Request OS", "Status", "Aksi"]}>
             {requests.data.filter((item) => item.status === "PENDING").map((item) => (
               <TableRow key={item.id}>
+                <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString("id-ID") : "-"}</TableCell>
                 <TableCell>
                   {item.name}
                   {item.candidate && (
@@ -2679,8 +2686,8 @@ export function AccountApprovalPage() {
                         <div className="flex gap-3">
                           {item.candidate.fotoKtp && <img className="h-24 rounded border object-contain" src={item.candidate.fotoKtp} alt="Foto KTP kandidat" />}
                           {item.candidate.fotoSim && <img className="h-24 rounded border object-contain" src={item.candidate.fotoSim} alt="Foto SIM kandidat" />}
-                          {item.candidate.skck && <a className="self-center text-primary underline" href={item.candidate.skck} target="_blank" rel="noreferrer">Lihat SKCK</a>}
-                          {item.candidate.hasSkbn && <a className="self-center text-primary underline" href={`/api/candidate/${item.candidate.id}/skbn`} target="_blank" rel="noreferrer">Lihat SKBN</a>}
+                          {item.candidate.skck && <a href={item.candidate.skck} target="_blank" rel="noreferrer">{item.candidate.skck.startsWith("data:image/") ? <img className="h-24 rounded border object-contain" src={item.candidate.skck} alt="SKCK kandidat" /> : <span className="text-primary underline">Lihat SKCK (PDF)</span>}</a>}
+                          {item.candidate.hasSkbn && <a href={`/api/candidate/${item.candidate.id}/skbn`} target="_blank" rel="noreferrer">{item.candidate.skbnIsImage ? <img className="h-24 rounded border object-contain" src={`/api/candidate/${item.candidate.id}/skbn`} alt="SKBN kandidat" /> : <span className="text-primary underline">Lihat SKBN (PDF)</span>}</a>}
                         </div>
                       </div>
                     </details>
@@ -2783,8 +2790,8 @@ export function ClaimsPage() {
       <Card><CardContent className="p-0">
         <LoadingError loading={claims.loading} error={claims.error} empty={!claims.data.length} />
         {!claims.loading && !claims.error && claims.data.length > 0 && (
-          <DataTable headers={["Bulan", "Jenis", "Jumlah Mitra", "Nominal", "Vendor", "Dokumen", "Status"]}>
-            {claims.data.map((item) => <TableRow key={item.id}><TableCell>{item.bulan}</TableCell><TableCell>{item.jenisClaim}</TableCell><TableCell>{item.jumlahMitra}</TableCell><TableCell>{item.nominal.toLocaleString("id-ID")}</TableCell><TableCell>{item.vendor?.name || "-"}</TableCell><TableCell>{item.hasDokumen ? <a className="text-primary underline" href={`/api/claim/${item.id}`} target="_blank" rel="noreferrer">{item.dokumenNama || "Unduh"}</a> : "-"}</TableCell><TableCell><StatusBadge status={item.status} /></TableCell></TableRow>)}
+          <DataTable headers={["Tanggal", "Bulan", "Jenis", "Jumlah Mitra", "Nominal", "Vendor", "Dokumen", "Status"]}>
+            {claims.data.map((item) => <TableRow key={item.id}><TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString("id-ID") : "-"}</TableCell><TableCell>{item.bulan}</TableCell><TableCell>{item.jenisClaim}</TableCell><TableCell>{item.jumlahMitra}</TableCell><TableCell>{item.nominal.toLocaleString("id-ID")}</TableCell><TableCell>{item.vendor?.name || "-"}</TableCell><TableCell>{item.hasDokumen ? <a className="text-primary underline" href={`/api/claim/${item.id}`} target="_blank" rel="noreferrer">{item.dokumenNama || "Unduh"}</a> : "-"}</TableCell><TableCell><StatusBadge status={item.status} /></TableCell></TableRow>)}
           </DataTable>
         )}
       </CardContent></Card>
@@ -2887,9 +2894,10 @@ export function InvoicesPage() {
       <Card><CardContent className="p-0">
         <LoadingError loading={invoices.loading} error={invoices.error} empty={!invoices.data.length} />
         {!invoices.loading && !invoices.error && invoices.data.length > 0 && (
-          <DataTable headers={["Nomor", "Bulan", "Vendor", "Total", "Jatuh Tempo", "Dokumen", "Bukti Transfer", "Status"]}>
+          <DataTable headers={["Tanggal", "Nomor", "Bulan", "Vendor", "Total", "Jatuh Tempo", "Dokumen", "Bukti Transfer", "Status"]}>
             {invoices.data.map((item) => (
               <TableRow key={item.id}>
+                <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString("id-ID") : "-"}</TableCell>
                 <TableCell>{item.nomorInvoice}</TableCell>
                 <TableCell>{item.bulan}</TableCell>
                 <TableCell>{item.vendor?.name || "-"}</TableCell>
@@ -3150,6 +3158,7 @@ export function OSRequestPage() {
     activeReviewRequest && acceptedCandidateCount < activeReviewRequest.jumlah,
   );
   const tableHeaders = [
+    "Tanggal",
     "Jenis",
     "Jumlah",
     "ID Mitra OS",
@@ -3166,6 +3175,7 @@ export function OSRequestPage() {
     <DataTable headers={tableHeaders}>
       {items.map((item) => (
         <TableRow key={item.id}>
+          <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString("id-ID") : "-"}</TableCell>
           <TableCell>{item.type}</TableCell>
           <TableCell>{item.jumlah}</TableCell>
           <TableCell>
@@ -3643,10 +3653,9 @@ export function OSRequestPage() {
                     <div className="space-y-1">
                       <span className="text-[11px] font-medium text-muted-foreground">SKBN</span>
                       <a href={`/api/candidate/${candidate.id}/skbn`} target="_blank" rel="noreferrer" className="block">
-                        <div className="flex h-24 w-24 flex-col items-center justify-center rounded border bg-muted/40 p-2 text-center hover:bg-muted/70 transition">
-                          <FileText className="h-8 w-8 text-primary" />
-                          <span className="mt-1 text-[10px] font-medium leading-tight text-primary underline">Lihat SKBN</span>
-                        </div>
+                        {candidate.skbnIsImage
+                          ? <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={`/api/candidate/${candidate.id}/skbn`} alt={`SKBN ${candidate.name}`} />
+                          : <div className="flex h-24 w-24 flex-col items-center justify-center rounded border bg-muted/40 p-2 text-center hover:bg-muted/70 transition"><FileText className="h-8 w-8 text-primary" /><span className="mt-1 text-[10px] font-medium leading-tight text-primary underline">Lihat SKBN (PDF)</span></div>}
                       </a>
                     </div>
                   )}
@@ -3821,8 +3830,8 @@ export function ApprovalPage() {
       <Card><CardContent className="p-0">
         <LoadingError loading={approvals.loading} error={approvals.error} empty={!approvals.data.length} />
         {!approvals.loading && !approvals.error && approvals.data.length > 0 && (
-          <DataTable headers={["Level", "Jenis", "Jumlah", "Posisi", "Pemohon", "Status", "Aksi"]}>
-            {approvals.data.map((item) => <TableRow key={item.id}><TableCell>{item.level}</TableCell><TableCell>{item.osRequest.type}</TableCell><TableCell>{item.osRequest.jumlah}</TableCell><TableCell>{item.osRequest.posisi || "-"}</TableCell><TableCell>{item.osRequest.requester?.name || "-"}</TableCell><TableCell><StatusBadge status={item.status} /></TableCell><TableCell>{item.status === "PENDING" && <div className="flex gap-2"><Button disabled={busyId === item.id} onClick={() => decide(item.id, "APPROVED")}>Setujui</Button><Button variant="outline" disabled={busyId === item.id} onClick={() => decide(item.id, "REJECTED")}>Tolak</Button></div>}</TableCell></TableRow>)}
+          <DataTable headers={["Tanggal", "Level", "Jenis", "Jumlah", "Posisi", "Pemohon", "Status", "Aksi"]}>
+            {approvals.data.map((item) => <TableRow key={item.id}><TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString("id-ID") : "-"}</TableCell><TableCell>{item.level}</TableCell><TableCell>{item.osRequest.type}</TableCell><TableCell>{item.osRequest.jumlah}</TableCell><TableCell>{item.osRequest.posisi || "-"}</TableCell><TableCell>{item.osRequest.requester?.name || "-"}</TableCell><TableCell><StatusBadge status={item.status} /></TableCell><TableCell>{item.status === "PENDING" && <div className="flex gap-2"><Button disabled={busyId === item.id} onClick={() => decide(item.id, "APPROVED")}>Setujui</Button><Button variant="outline" disabled={busyId === item.id} onClick={() => decide(item.id, "REJECTED")}>Tolak</Button></div>}</TableCell></TableRow>)}
           </DataTable>
         )}
       </CardContent></Card>

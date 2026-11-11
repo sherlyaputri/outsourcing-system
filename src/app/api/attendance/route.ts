@@ -42,15 +42,16 @@ export async function GET(req: NextRequest) {
       include: {
         user: {
           select: {
+            id: true,
             name: true,
             email: true,
             vendorId: true,
-            mitraProfile: { select: { waktuKerja: true } },
+            mitraProfile: { select: { waktuKerja: true, idMitraOs: true, status: true, posisi: true, penempatan: true } },
           },
         },
       },
       orderBy: { date: "desc" },
-      take: 100,
+      take: month ? 5000 : 100,
     });
 
     if (session.user.role === "MITRA" && month) {
