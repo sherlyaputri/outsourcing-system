@@ -70,11 +70,12 @@ export async function GET() {
       counts["/dashboard/data-karyawan"] = incompleteEmployees;
       counts["/dashboard/mitra"] = incompleteMitraProfiles + incompleteAdditionalDocuments;
     } else if (session.user.role === "VM") {
-      const [accountRequests, osRequests] = await Promise.all([
+      const [accountRequests, pendingVendors, osRequests] = await Promise.all([
         prisma.accountRequest.count({ where: { status: "PENDING" } }),
+        prisma.vendor.count({ where: { status: "PENDING" } }),
         prisma.oSRequest.count({ where: { status: "APPROVED_COO" } }),
       ]);
-      counts["/dashboard/approval-akun"] = accountRequests;
+      counts["/dashboard/approval-akun"] = accountRequests + pendingVendors;
       counts["/dashboard/request-os"] = osRequests;
     } else if (session.user.role === "SM") {
       counts["/dashboard/request-os"] = await prisma.candidate.count({

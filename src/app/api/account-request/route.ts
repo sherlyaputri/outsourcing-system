@@ -81,11 +81,29 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: "desc" },
     });
 
+    const vendorIds = [...new Set(requests.map((request) => request.vendorId).filter((id): id is string => Boolean(id)))];
+    const vendorEmails = [...new Set(requests.filter((request) => request.type === "VENDOR").map((request) => request.email))];
+    const vendorLookup = [
+      ...(vendorIds.length ? [{ id: { in: vendorIds } }] : []),
+      ...(vendorEmails.length ? [{ email: { in: vendorEmails } }] : []),
+    ];
+    const vendors = vendorLookup.length
+      ? await prisma.vendor.findMany({ where: { OR: vendorLookup }, select: { id: true, name: true, email: true } })
+      : [];
+    const vendorNameById = new Map(vendors.map((vendor) => [vendor.id, vendor.name]));
+    const vendorNameByEmail = new Map(vendors.filter((vendor) => vendor.email).map((vendor) => [vendor.email!, vendor.name]));
+
     const response = requests.map((request) => {
+      const requestWithVendor = {
+        ...request,
+        vendorName: (request.vendorId ? vendorNameById.get(request.vendorId) : null)
+          || (request.type === "VENDOR" ? vendorNameByEmail.get(request.email) : null)
+          || null,
+      };
       if (request.candidate && "skbn" in request.candidate) {
         const { skbn, ...candidateSummary } = request.candidate;
         return {
-          ...request,
+          ...requestWithVendor,
           candidate: {
             ...candidateSummary,
             hasSkbn: Boolean(skbn),
@@ -93,7 +111,7 @@ export async function GET(req: NextRequest) {
           },
         };
       }
-      return request;
+      return requestWithVendor;
     });
 
     return NextResponse.json(response);
@@ -204,6 +222,38 @@ export async function PATCH(req: NextRequest) {
     }
 
     if (status === "APPROVED") {
+      if (accountReq.type === "VENDOR") {
+        const vendor = accountReq.vendorId
+          ? await prisma.vendor.findUnique({ where: { id: accountReq.vendorId } })
+          : await prisma.vendor.findFirst({ where: { email: accountReq.email } });
+        if (!vendor) return NextResponse.json({ error: "Data perusahaan vendor tidak ditemukan." }, { status: 404 });
+        const existingUser = await prisma.user.findUnique({ where: { email: accountReq.email } });
+        if (existingUser && (existingUser.role !== "VENDOR" || existingUser.status === "ACTIVE")) {
+          return NextResponse.json({ error: "Email sudah digunakan oleh akun lain." }, { status: 409 });
+        }
+
+        const initialPassword = generateInitialPassword();
+        const [hashedPassword] = await Promise.all([bcrypt.hash(initialPassword, 10)]);
+        const encryptedInitialPassword = encryptInitialPassword(initialPassword);
+        const result = await prisma.$transaction(async (tx) => {
+          const user = existingUser
+            ? await tx.user.update({
+                where: { id: existingUser.id },
+                data: { password: hashedPassword, initialPasswordEncrypted: encryptedInitialPassword, name: accountReq.name, role: "VENDOR", status: "ACTIVE", phone: accountReq.phone, vendorId: vendor.id },
+              })
+            : await tx.user.create({
+                data: { email: accountReq.email, password: hashedPassword, initialPasswordEncrypted: encryptedInitialPassword, name: accountReq.name, role: "VENDOR", status: "ACTIVE", phone: accountReq.phone, vendorId: vendor.id },
+              });
+          await tx.vendor.update({ where: { id: vendor.id }, data: { status: "ACTIVE" } });
+          const updatedRequest = await tx.accountRequest.update({
+            where: { id: requestId },
+            data: { status: "ACTIVATED", vendorId: vendor.id, catatan, handlerId: session.user.id },
+          });
+          return { ...updatedRequest, initialPassword, userId: user.id };
+        });
+        return NextResponse.json(result);
+      }
+
       const initialPassword = generateInitialPassword();
       const hashedPassword = await bcrypt.hash(initialPassword, 10);
       const encryptedInitialPassword = encryptInitialPassword(initialPassword);

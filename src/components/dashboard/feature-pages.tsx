@@ -127,11 +127,13 @@ function getMissingCandidateFields(candidate: OSCandidate): string[] {
 
 interface AccountRequest {
   id: string;
+  type: string;
   name: string;
   email: string;
   phone?: string | null;
   status: string;
   createdAt?: string;
+  vendorName?: string | null;
   catatan?: string | null;
   requester?: { name: string; role: string };
   handler?: { name: string; role: string } | null;
@@ -2651,14 +2653,22 @@ function VendorCandidateForm({
 
 export function AccountApprovalPage() {
   const requests = useApiData<AccountRequest[]>("/api/account-request", []);
+  const vendors = useApiData<Vendor[]>("/api/vendor", []);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [activatedVendorCredentials, setActivatedVendorCredentials] = useState<{ name: string; email: string; password: string } | null>(null);
+  const pendingAccounts = requests.data.filter((item) => item.status === "PENDING");
+  const pendingVendors = vendors.data.filter((vendor) => vendor.status === "PENDING");
 
   async function decide(requestId: string, status: "APPROVED" | "REJECTED") {
     setError(null);
     setBusyId(requestId);
     try {
-      await sendJson("/api/account-request", "PATCH", { requestId, status });
+      const result = await sendJson("/api/account-request", "PATCH", { requestId, status });
+      const request = requests.data.find((item) => item.id === requestId);
+      if (status === "APPROVED" && request?.type === "VENDOR" && result.initialPassword) {
+        setActivatedVendorCredentials({ name: request.vendorName || request.name, email: request.email, password: result.initialPassword });
+      }
       requests.reload();
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Gagal memproses request.");
@@ -2667,18 +2677,51 @@ export function AccountApprovalPage() {
     }
   }
 
+  async function approveVendor(vendor: Vendor) {
+    setError(null);
+    setBusyId(vendor.id);
+    try {
+      const result = await sendJson("/api/vendor", "PATCH", { action: "APPROVE", vendorId: vendor.id });
+      if (result.initialPassword) {
+        setActivatedVendorCredentials({ name: vendor.name, email: vendor.email || "", password: result.initialPassword });
+      }
+      vendors.reload();
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Gagal mengaktifkan akun vendor.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   return (
-    <FeaturePage title="Aktivasi Akun" description="Aktifkan akun kandidat yang telah lolos seleksi SM." roles={["VM"]}>
+    <FeaturePage title="Aktivasi Akun" description="Aktifkan akun Vendor OS dan Mitra OS yang menunggu persetujuan." roles={["VM"]}>
       <FormError error={error} />
-      <Card><CardContent className="p-0">
-        <LoadingError loading={requests.loading} error={requests.error} empty={!requests.data.some((item) => item.status === "PENDING")} />
-        {!requests.loading && !requests.error && requests.data.filter((item) => item.status === "PENDING").length > 0 && (
+      <LoadingError loading={requests.loading || vendors.loading} error={requests.error || vendors.error} empty={!pendingAccounts.length && !pendingVendors.length} />
+      {pendingVendors.length > 0 && (
+        <Card>
+          <CardHeader><CardTitle className="text-lg">Vendor OS Menunggu Persetujuan</CardTitle></CardHeader>
+          <CardContent className="overflow-x-auto p-0">
+            <DataTable headers={["Nama Vendor", "Email Akun", "Telepon", "Status", "Aksi"]}>
+              {pendingVendors.map((vendor) => <TableRow key={vendor.id}>
+                <TableCell className="font-medium">{vendor.name}</TableCell>
+                <TableCell>{vendor.email || "-"}</TableCell>
+                <TableCell>{vendor.phone || "-"}</TableCell>
+                <TableCell><StatusBadge status={vendor.status} /></TableCell>
+                <TableCell><Button disabled={busyId === vendor.id || !vendor.email} onClick={() => approveVendor(vendor)}>{busyId === vendor.id ? "Mengaktifkan..." : "Setujui Akun Vendor"}</Button></TableCell>
+              </TableRow>)}
+            </DataTable>
+          </CardContent>
+        </Card>
+      )}
+      {pendingAccounts.length > 0 && <Card><CardContent className="overflow-x-auto p-0">
+        <h2 className="px-4 py-3 text-lg font-semibold">Akun Mitra OS Menunggu Persetujuan</h2>
           <DataTable headers={["Tanggal", "Nama", "Email", "Telepon", "Vendor/Pemohon", "Request OS", "Status", "Aksi"]}>
-            {requests.data.filter((item) => item.status === "PENDING").map((item) => (
+            {pendingAccounts.map((item) => (
               <TableRow key={item.id}>
                 <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString("id-ID") : "-"}</TableCell>
                 <TableCell>
                   {item.name}
+                  <p className="mt-1 text-xs text-muted-foreground">Jenis akun: {item.type === "VENDOR" ? "Vendor OS" : "Mitra OS"}</p>
                   {item.candidate && (
                     <details className="mt-2 text-xs">
                       <summary className="cursor-pointer text-primary">Lihat data kandidat</summary>
@@ -2697,18 +2740,28 @@ export function AccountApprovalPage() {
                     </details>
                   )}
                 </TableCell><TableCell>{item.email}</TableCell>
-                <TableCell>{item.phone || "-"}</TableCell><TableCell>{item.requester?.name || "-"}</TableCell>
+                <TableCell>{item.phone || "-"}</TableCell><TableCell>{item.vendorName || item.requester?.name || "-"}</TableCell>
                 <TableCell>{item.candidate ? `${item.candidate.osRequest.type} · ${item.candidate.osRequest.jumlah} orang` : "-"}</TableCell>
                 <TableCell><StatusBadge status={item.status} /></TableCell>
                 <TableCell className="space-x-2">
-                  <Button disabled={busyId === item.id} onClick={() => decide(item.id, "APPROVED")}>Aktivasi Akun</Button>
+                  <Button disabled={busyId === item.id} onClick={() => decide(item.id, "APPROVED")}>{item.type === "VENDOR" ? "Aktifkan Akun Vendor" : "Aktivasi Akun"}</Button>
                   <Button variant="outline" disabled={busyId === item.id} onClick={() => decide(item.id, "REJECTED")}>Tolak</Button>
                 </TableCell>
               </TableRow>
             ))}
           </DataTable>
-        )}
-      </CardContent></Card>
+      </CardContent></Card>}
+      <Dialog open={Boolean(activatedVendorCredentials)} onOpenChange={(open) => { if (!open) setActivatedVendorCredentials(null); }}>
+        <DialogHeader><DialogTitle>Akun Vendor OS aktif</DialogTitle></DialogHeader>
+        <DialogContent>
+          {activatedVendorCredentials && <div className="space-y-2 text-sm">
+            <p>Perusahaan: <strong>{activatedVendorCredentials.name}</strong></p>
+            <p>Username: <strong>{activatedVendorCredentials.email}</strong></p>
+            <p>Password awal: <code className="rounded bg-muted px-2 py-1">{activatedVendorCredentials.password}</code></p>
+            <p className="text-xs text-muted-foreground">Simpan kredensial ini dan sampaikan kepada admin vendor. Password awal ditampilkan saat aktivasi.</p>
+          </div>}
+        </DialogContent>
+      </Dialog>
     </FeaturePage>
   );
 }
@@ -3395,12 +3448,14 @@ export function OSRequestPage() {
     setError(null);
     setCandidateActionId(candidateDecision.candidateId);
     try {
-      await sendJson("/api/candidate", "PATCH", {
+      const result = await sendJson("/api/candidate", "PATCH", {
         ...candidateDecision,
         alasanKeputusan: candidateDecisionReason.trim(),
       });
       requests.reload();
-      setCandidateDecision(null);
+      setCandidateDecision(result.nextCandidateToRejectId
+        ? { candidateId: result.nextCandidateToRejectId, decision: "REJECTED" }
+        : null);
       setCandidateDecisionReason("");
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Gagal memproses kandidat.");
@@ -4001,6 +4056,28 @@ export function OSRequestPage() {
                     ) : <StatusBadge status={candidate.status} />}
                   </div>
                 </div>
+                {candidateDecision?.candidateId === candidate.id && (
+                  <div className={`mt-4 space-y-3 rounded-md border p-3 ${candidateDecision.decision === "REJECTED" ? "border-red-300 bg-red-50" : "bg-muted"}`}>
+                    <label className="block space-y-1 text-sm font-medium">
+                      {candidateDecision.decision === "REJECTED" ? "Alasan kandidat ditolak" : "Alasan kandidat diterima"}<RequiredMark />
+                      <textarea
+                        className={fieldClass}
+                        rows={3}
+                        value={candidateDecisionReason}
+                        onChange={(event) => setCandidateDecisionReason(event.target.value)}
+                        maxLength={2000}
+                        required
+                        placeholder={candidateDecision.decision === "REJECTED" ? "Tuliskan alasan penolakan kandidat..." : "Tuliskan alasan penerimaan kandidat..."}
+                      />
+                    </label>
+                    <div className="flex justify-end gap-2">
+                      <Button type="button" variant="outline" onClick={() => setCandidateDecision(null)}>Batal</Button>
+                      <Button type="button" disabled={candidateActionId === candidate.id || !candidateDecisionReason.trim()} onClick={decideCandidate}>
+                        {candidateActionId === candidate.id ? "Menyimpan..." : "Simpan keputusan"}
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 <div className="mt-3 flex flex-wrap gap-3">
                   {candidate.fotoKtp && (
                     <div className="space-y-1">
@@ -4059,33 +4136,6 @@ export function OSRequestPage() {
                     </div>
                   )}
                 </div>
-                {candidateDecision?.candidateId === candidate.id && (
-                  <div className="mt-4 space-y-3 rounded-md bg-muted p-3">
-                    <label className="block space-y-1 text-sm">
-                      Alasan {candidateDecision.decision === "APPROVED" ? "diterima" : "ditolak"}<RequiredMark />
-                      <textarea
-                        className={fieldClass}
-                        rows={3}
-                        value={candidateDecisionReason}
-                        onChange={(event) => setCandidateDecisionReason(event.target.value)}
-                        maxLength={2000}
-                        required
-                      />
-                    </label>
-                    <div className="flex justify-end gap-2">
-                      <Button type="button" variant="outline" onClick={() => setCandidateDecision(null)}>
-                        Batal
-                      </Button>
-                      <Button
-                        type="button"
-                        disabled={candidateActionId === candidate.id || !candidateDecisionReason.trim()}
-                        onClick={decideCandidate}
-                      >
-                        {candidateActionId === candidate.id ? "Menyimpan..." : "Simpan keputusan"}
-                      </Button>
-                    </div>
-                  </div>
-                )}
               </div>
               );
             })

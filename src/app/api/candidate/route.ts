@@ -516,47 +516,6 @@ export async function PATCH(req: NextRequest) {
         });
       }
 
-      let autoRejectedCount = 0;
-      if (decision === "APPROVED") {
-        const acceptedCount = await tx.candidate.count({
-          where: {
-            osRequestId: candidate.osRequestId,
-            status: { in: ["TERPILIH", "ACTIVATED"] },
-          },
-        });
-        if (acceptedCount >= candidate.osRequest.jumlah) {
-          const remainingCandidates = await tx.candidate.findMany({
-            where: { osRequestId: candidate.osRequestId, status: "KANDIDAT" },
-            select: { id: true, accountRequestId: true, vendorEmployeeId: true },
-          });
-          autoRejectedCount = (await tx.candidate.updateMany({
-            where: {
-              osRequestId: candidate.osRequestId,
-              status: "KANDIDAT",
-            },
-            data: { status: "DITOLAK", alasanKeputusan: "Kuota kandidat diterima telah terpenuhi." },
-          })).count;
-          const accountRequestIds = remainingCandidates
-            .map((remainingCandidate) => remainingCandidate.accountRequestId)
-            .filter((id): id is string => id !== null);
-          if (accountRequestIds.length > 0) {
-            await tx.accountRequest.updateMany({
-              where: { id: { in: accountRequestIds } },
-              data: { status: "REJECTED" },
-            });
-          }
-          const rejectedEmployeeIds = remainingCandidates
-            .map((remainingCandidate) => remainingCandidate.vendorEmployeeId)
-            .filter((id): id is string => id !== null);
-          if (rejectedEmployeeIds.length > 0) {
-            await tx.vendorEmployee.updateMany({
-              where: { id: { in: rejectedEmployeeIds }, status: "IN_SELECTION" },
-              data: { status: "ACTIVE" },
-            });
-          }
-        }
-      }
-
       if (decision === "REJECTED" && candidate.vendorEmployeeId) {
         await tx.vendorEmployee.updateMany({
           where: { id: candidate.vendorEmployeeId, status: "IN_SELECTION" },
@@ -564,10 +523,11 @@ export async function PATCH(req: NextRequest) {
         });
       }
 
-      const undecidedCount = await tx.candidate.count({
+      const undecidedCandidates = await tx.candidate.findMany({
         where: { osRequestId: candidate.osRequestId, status: "KANDIDAT" },
+        select: { id: true },
       });
-      if (undecidedCount === 0) {
+      if (undecidedCandidates.length === 0) {
         const selectedCount = await tx.candidate.count({
           where: { osRequestId: candidate.osRequestId, status: "TERPILIH" },
         });
@@ -582,10 +542,17 @@ export async function PATCH(req: NextRequest) {
         });
       }
 
+      const selectedCount = await tx.candidate.count({
+        where: { osRequestId: candidate.osRequestId, status: { in: ["TERPILIH", "ACTIVATED"] } },
+      });
+      const nextCandidateToRejectId = selectedCount >= candidate.osRequest.jumlah
+        ? undecidedCandidates[0]?.id || null
+        : null;
+
       return {
         id: candidate.id,
         status: decision === "APPROVED" ? "TERPILIH" : "DITOLAK",
-        autoRejectedCount,
+        nextCandidateToRejectId,
       };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
