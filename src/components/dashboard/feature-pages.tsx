@@ -26,6 +26,12 @@ interface Vendor {
   address?: string | null;
   phone?: string | null;
   email?: string | null;
+  npwp?: string | null;
+  picName?: string | null;
+  picPhone?: string | null;
+  bankAccountName?: string | null;
+  bankAccountNumber?: string | null;
+  companyTaxStatus?: string | null;
   removalReason?: string | null;
   removedAt?: string | null;
   _count?: { users: number };
@@ -4777,11 +4783,12 @@ export function OSRequestPage() {
       )}
       {session?.user.role === "VENDOR" && recentVendorNotifications.length > 0 && (
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Pemberitahuan Mitra OS</CardTitle>
-            <p className="text-sm text-muted-foreground">Request penambahan, pergantian, atau pengurangan dalam 14 hari terakhir.</p>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
+          <details>
+          <summary className="cursor-pointer list-none px-6 py-4">
+            <span className="font-semibold">Pemberitahuan Mitra OS ({recentVendorNotifications.length})</span>
+            <span className="ml-2 text-sm text-muted-foreground">Request penambahan, pergantian, atau pengurangan · 14 hari terakhir</span>
+          </summary>
+          <CardContent className="space-y-2 border-t text-sm">
             {recentVendorNotifications.map((item) => {
                 const targetMitras = (item.mitraTargets || []).map((profileId) =>
                   mitras.data.find((mitra) => mitra.mitraProfile?.id === profileId),
@@ -4805,6 +4812,7 @@ export function OSRequestPage() {
                 );
               })}
           </CardContent>
+          </details>
         </Card>
       )}
       {["SM", "VENDOR", "VM"].includes(session?.user.role || "") ? (

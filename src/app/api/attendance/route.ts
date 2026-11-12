@@ -49,16 +49,13 @@ export async function POST(req: NextRequest) {
     tomorrow.setDate(tomorrow.getDate() + 1);
 
     if (body.isCheckOut === true) {
-      const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
       const existing = await prisma.attendance.findFirst({
         where: {
           userId: session.user.id,
-          date: { gte: yesterday, lt: tomorrow },
           checkIn: { not: null },
           checkOut: null,
         },
-        orderBy: { date: "desc" },
+        orderBy: [{ date: "desc" }, { checkIn: "desc" }],
       });
       if (!existing?.checkIn) {
         return NextResponse.json({ error: "Tidak ada absensi check-in yang perlu diakhiri." }, { status: 400 });
@@ -107,10 +104,10 @@ export async function POST(req: NextRequest) {
     const openAttendance = await prisma.attendance.findFirst({
       where: {
         userId: session.user.id,
-        date: { gte: new Date(Date.now() - 36 * 60 * 60 * 1000) },
         checkIn: { not: null },
         checkOut: null,
       },
+      orderBy: [{ date: "desc" }, { checkIn: "desc" }],
     });
     if (existingToday?.checkIn || openAttendance) {
       return NextResponse.json({ error: "Anda sudah check-in dan belum melakukan check-out." }, { status: 400 });

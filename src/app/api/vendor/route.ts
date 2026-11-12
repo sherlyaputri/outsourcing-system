@@ -14,7 +14,11 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const where = session.user.role === "VENDOR"
+      ? session.user.vendorId ? { id: session.user.vendorId } : { id: "__missing_vendor__" }
+      : {};
     const vendors = await prisma.vendor.findMany({
+      where,
       include: {
         _count: {
           select: { users: { where: { role: "MITRA" } } },
@@ -33,13 +37,42 @@ export async function GET() {
 export async function PATCH(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "VM") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
     const body = await req.json();
     const action = typeof body.action === "string" ? body.action : "REMOVE";
     const vendorId = typeof body.vendorId === "string" ? body.vendorId.trim() : "";
+
+    if (session?.user.role === "VENDOR" && action === "UPDATE_PROFILE") {
+      if (!session.user.vendorId) return NextResponse.json({ error: "Akun vendor tidak terhubung ke data perusahaan." }, { status: 403 });
+      const name = typeof body.name === "string" ? body.name.trim() : "";
+      const address = typeof body.address === "string" ? body.address.trim() : "";
+      const npwp = typeof body.npwp === "string" ? body.npwp.trim() : "";
+      const picName = typeof body.picName === "string" ? body.picName.trim() : "";
+      const picPhone = typeof body.picPhone === "string" ? body.picPhone.trim() : "";
+      const bankAccountName = typeof body.bankAccountName === "string" ? body.bankAccountName.trim() : "";
+      const bankAccountNumber = typeof body.bankAccountNumber === "string" ? body.bankAccountNumber.trim() : "";
+      const companyTaxStatus = typeof body.companyTaxStatus === "string" ? body.companyTaxStatus.trim() : "";
+      if (!name || !address || !npwp || !picName || !picPhone || !bankAccountName || !bankAccountNumber || !companyTaxStatus) {
+        return NextResponse.json({ error: "Lengkapi semua data perusahaan dan PIC." }, { status: 400 });
+      }
+      if (!["PKP", "NON_PKP"].includes(companyTaxStatus)) return NextResponse.json({ error: "Status perpajakan perusahaan tidak valid." }, { status: 400 });
+      if (name.length > 200 || npwp.length > 40 || picName.length > 200 || companyTaxStatus.length > 100) {
+        return NextResponse.json({ error: "Ada data yang melebihi batas panjang." }, { status: 400 });
+      }
+      const vendor = await prisma.$transaction(async (tx) => {
+        const updatedVendor = await tx.vendor.update({
+          where: { id: session.user.vendorId! },
+          data: { name, address, phone: picPhone, npwp, picName, picPhone, bankAccountName, bankAccountNumber, companyTaxStatus },
+        });
+        await tx.user.updateMany({
+          where: { vendorId: session.user.vendorId!, role: "VENDOR" },
+          data: { name: picName, phone: picPhone },
+        });
+        return updatedVendor;
+      });
+      return NextResponse.json(vendor);
+    }
+
+    if (!session || session.user.role !== "VM") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     if (action === "APPROVE") {
       if (!vendorId) return NextResponse.json({ error: "Pilih vendor yang akan diaktifkan." }, { status: 400 });

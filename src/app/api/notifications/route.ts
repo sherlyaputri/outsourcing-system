@@ -36,19 +36,11 @@ export async function GET() {
       });
       counts["/dashboard/absensi"] = todayAttendance?.checkIn && todayAttendance.checkOut ? 0 : 1;
     } else if (session.user.role === "VENDOR" && session.user.vendorId) {
-      const notificationWindowStart = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
-      const [requests, recentChanges, incompleteEmployees, incompleteMitraProfiles, mitraDocumentProfiles] = await Promise.all([
+      const [requests, incompleteEmployees, incompleteMitraProfiles, mitraDocumentProfiles] = await Promise.all([
         prisma.oSRequest.count({
           where: {
             vendorId: session.user.vendorId,
             status: { in: ["VENDOR_SELECTED", "WAITING_VENDOR_REQUEST"] },
-          },
-        }),
-        prisma.oSRequest.count({
-          where: {
-            vendorId: session.user.vendorId,
-            vendorNotifiedAt: { gte: notificationWindowStart },
-            type: { in: ["PENAMBAHAN", "PERGANTIAN", "PENGURANGAN"] },
           },
         }),
         prisma.vendorEmployee.count({
@@ -66,7 +58,8 @@ export async function GET() {
       const incompleteAdditionalDocuments = mitraDocumentProfiles.filter((profile) =>
         requiredDocuments.some((name) => !profile.documents.some((document) => document.name === name)),
       ).length;
-      counts["/dashboard/request-os"] = requests + recentChanges;
+      // Count only requests that still need vendor action. Informational notices are displayed separately.
+      counts["/dashboard/request-os"] = requests;
       counts["/dashboard/data-karyawan"] = incompleteEmployees;
       counts["/dashboard/mitra"] = incompleteMitraProfiles + incompleteAdditionalDocuments;
     } else if (session.user.role === "VM") {

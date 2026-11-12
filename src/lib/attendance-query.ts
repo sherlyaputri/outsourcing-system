@@ -128,23 +128,22 @@ export async function queryAttendances(
     take: options?.takeLimit ?? (where.date ? 5000 : 100),
   });
 
-  if (sessionUser.role === "MITRA" && month && !hasExplicitDateFilter) {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    yesterday.setHours(0, 0, 0, 0);
+  if (sessionUser.role === "MITRA" && !hasExplicitDateFilter) {
     const openAttendance = await prisma.attendance.findFirst({
       where: {
         userId: sessionUser.id,
-        date: { gte: yesterday },
         checkIn: { not: null },
         checkOut: null,
       },
       include: ATTENDANCE_INCLUDE,
-      orderBy: { date: "desc" },
+      orderBy: [{ date: "desc" }, { checkIn: "desc" }],
     });
     if (openAttendance && !attendances.some(({ id }) => id === openAttendance.id)) {
       attendances.push(openAttendance);
-      attendances.sort((first, second) => second.date.getTime() - first.date.getTime());
+      attendances.sort((first, second) =>
+        second.date.getTime() - first.date.getTime()
+        || (second.checkIn?.getTime() || 0) - (first.checkIn?.getTime() || 0),
+      );
     }
   }
 

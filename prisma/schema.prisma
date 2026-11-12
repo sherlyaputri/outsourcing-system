@@ -33,16 +33,22 @@ model User {
 }
 
 model Vendor {
-  id            String    @id @default(cuid())
-  name          String
-  address       String?   @db.Text
-  phone         String?
-  email         String?
-  status        String    @default("PENDING") // PENDING, ACTIVE, INACTIVE
-  removalReason String?   @db.Text
-  removedAt     DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @default(now()) @updatedAt
+  id                 String    @id @default(cuid())
+  name               String
+  address            String?   @db.Text
+  phone              String?
+  email              String?
+  npwp               String?
+  picName            String?
+  picPhone           String?
+  bankAccountName    String?
+  bankAccountNumber  String?
+  companyTaxStatus   String?
+  status             String    @default("PENDING") // PENDING, ACTIVE, INACTIVE
+  removalReason      String?   @db.Text
+  removedAt          DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @default(now()) @updatedAt
 
   users         User[]
   mitraProfiles MitraProfile[]

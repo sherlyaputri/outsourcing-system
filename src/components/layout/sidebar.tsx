@@ -20,6 +20,7 @@ import {
   Menu,
   X,
 } from "lucide-react";
+import VendorSettings from "./vendor-settings";
 
 interface SidebarProps {
   role: string;
@@ -155,7 +156,8 @@ export default function Sidebar({ role, userName, vendorName }: SidebarProps) {
         )}
       >
         {/* Logo */}
-        <div className="flex flex-col items-center py-6 border-b">
+        <div className="relative flex flex-col items-center py-6 border-b">
+          {role === "VENDOR" && <VendorSettings />}
           <div className="w-12 h-12 bg-primary rounded-full flex items-center justify-center text-white font-bold text-xl">
             OS
           </div>
