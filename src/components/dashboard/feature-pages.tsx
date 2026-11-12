@@ -4822,11 +4822,14 @@ export function OSRequestPage() {
       )}
       {session?.user.role === "VENDOR" && recentVendorNotifications.length > 0 && (
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Pemberitahuan Mitra OS</CardTitle>
-            <p className="text-sm text-muted-foreground">Request penambahan, pergantian, atau pengurangan dalam 14 hari terakhir.</p>
-          </CardHeader>
-          <CardContent className="space-y-2 text-sm">
+          <details className="group">
+            <summary className="flex cursor-pointer list-none items-center gap-2 px-6 py-4">
+              <span className="font-semibold">Pemberitahuan Mitra OS</span>
+              <span className="ml-auto group-open:hidden" aria-hidden="true">&gt;</span>
+              <span className="ml-auto hidden group-open:inline" aria-hidden="true">v</span>
+            </summary>
+            <p className="px-6 pb-3 text-sm text-muted-foreground">Request penambahan, pergantian, atau pengurangan dalam 14 hari terakhir.</p>
+          <CardContent className="space-y-2 border-t text-sm">
             {recentVendorNotifications.map((item) => {
               const targetMitras = (item.mitraTargets || []).map((profileId) =>
                 mitras.data.find((mitra) => mitra.mitraProfile?.id === profileId),
@@ -4850,6 +4853,7 @@ export function OSRequestPage() {
               );
             })}
           </CardContent>
+          </details>
         </Card>
       )}
       {["SM", "VENDOR", "VM"].includes(session?.user.role || "") ? (
