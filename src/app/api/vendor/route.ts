@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
-import { encryptInitialPassword, generateInitialPassword } from "@/lib/initial-password";
+import { decryptInitialPassword, encryptInitialPassword, generateInitialPassword } from "@/lib/initial-password";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +17,35 @@ export async function GET() {
     const where = session.user.role === "VENDOR"
       ? session.user.vendorId ? { id: session.user.vendorId } : { id: "__missing_vendor__" }
       : {};
+
+    if (session.user.role === "VM") {
+      const vendors = await prisma.vendor.findMany({
+        where,
+        include: {
+          _count: {
+            select: { users: { where: { role: "MITRA" } } },
+          },
+          users: {
+            where: { role: "VENDOR" },
+            select: { email: true, initialPasswordEncrypted: true },
+            take: 1,
+          },
+        },
+        orderBy: { name: "asc" },
+      });
+
+      return NextResponse.json(vendors.map(({ users, ...vendor }) => {
+        const vendorUser = users[0] ?? null;
+        return {
+          ...vendor,
+          initialUsername: vendorUser?.email || vendor.email || null,
+          initialPassword: vendorUser?.initialPasswordEncrypted
+            ? decryptInitialPassword(vendorUser.initialPasswordEncrypted)
+            : null,
+        };
+      }));
+    }
+
     const vendors = await prisma.vendor.findMany({
       where,
       include: {

@@ -21,6 +21,7 @@ import {
   X,
 } from "lucide-react";
 import VendorSettings from "./vendor-settings";
+import ChangePasswordButton from "./change-password-button";
 
 interface SidebarProps {
   role: string;
@@ -199,8 +200,9 @@ export default function Sidebar({ role, userName, vendorName }: SidebarProps) {
           ))}
         </nav>
 
-        {/* Logout */}
-        <div className="p-3 border-t">
+        {/* Account Actions & Logout */}
+        <div className="p-3 border-t space-y-1">
+          <ChangePasswordButton onOpened={() => setMobileOpen(false)} />
           <button
             onClick={() => signOut({ callbackUrl: "/login" })}
             className="flex items-center gap-3 w-full px-3 py-2.5 rounded-md text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"

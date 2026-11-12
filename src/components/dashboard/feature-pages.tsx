@@ -26,12 +26,8 @@ interface Vendor {
   address?: string | null;
   phone?: string | null;
   email?: string | null;
-  npwp?: string | null;
-  picName?: string | null;
-  picPhone?: string | null;
-  bankAccountName?: string | null;
-  bankAccountNumber?: string | null;
-  companyTaxStatus?: string | null;
+  initialUsername?: string | null;
+  initialPassword?: string | null;
   removalReason?: string | null;
   removedAt?: string | null;
   _count?: { users: number };
@@ -416,21 +412,21 @@ function DataTable({
 
   const sortedRows = sort
     ? [...rows].sort((left, right) => {
-        const getCellText = (row: ReactNode, column: number) => {
-          if (!isValidElement<{ children?: ReactNode }>(row)) return "";
-          const cells = Children.toArray(row.props.children);
-          const cell = cells[column];
-          return isValidElement<{ children?: ReactNode }>(cell)
-            ? getSortableText(cell.props.children)
-            : getSortableText(cell);
-        };
-        const comparison = getCellText(left, sort.column).localeCompare(
-          getCellText(right, sort.column),
-          "id",
-          { numeric: true, sensitivity: "base" },
-        );
-        return sort.direction === "asc" ? comparison : -comparison;
-      })
+      const getCellText = (row: ReactNode, column: number) => {
+        if (!isValidElement<{ children?: ReactNode }>(row)) return "";
+        const cells = Children.toArray(row.props.children);
+        const cell = cells[column];
+        return isValidElement<{ children?: ReactNode }>(cell)
+          ? getSortableText(cell.props.children)
+          : getSortableText(cell);
+      };
+      const comparison = getCellText(left, sort.column).localeCompare(
+        getCellText(right, sort.column),
+        "id",
+        { numeric: true, sensitivity: "base" },
+      );
+      return sort.direction === "asc" ? comparison : -comparison;
+    })
     : rows;
 
   const hasPagination = Boolean(pageSize && pageSize > 0);
@@ -638,8 +634,14 @@ export function MitraManagementPage() {
         />
       )}
       {credentialMitra && credentialMitra.initialPassword && (
-        <MitraCredentialDialog
-          mitra={credentialMitra}
+        <CredentialDialog
+          title="Kredensial Awal Mitra OS"
+          name={credentialMitra.name}
+          subtitle={`${credentialMitra.mitraProfile?.idMitraOs ? `ID: ${credentialMitra.mitraProfile.idMitraOs}` : "ID Belum diatur"}${credentialMitra.vendor?.name ? ` · ${credentialMitra.vendor.name}` : ""}`}
+          status={credentialMitra.status}
+          username={credentialMitra.email}
+          password={credentialMitra.initialPassword}
+          helperText="Sampaikan kredensial awal ini kepada Mitra OS untuk login pertama kali. Kredensial akan otomatis disembunyikan setelah pengguna mengubah password."
           onClose={() => setCredentialMitra(null)}
         />
       )}
@@ -647,11 +649,23 @@ export function MitraManagementPage() {
   );
 }
 
-function MitraCredentialDialog({
-  mitra,
+function CredentialDialog({
+  title,
+  name,
+  subtitle,
+  status,
+  username,
+  password,
+  helperText,
   onClose,
 }: {
-  mitra: Mitra;
+  title: string;
+  name: string;
+  subtitle?: string;
+  status: string;
+  username: string;
+  password: string;
+  helperText: string;
   onClose: () => void;
 }) {
   const [copiedField, setCopiedField] = useState<"email" | "password" | "both" | null>(null);
@@ -673,32 +687,29 @@ function MitraCredentialDialog({
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2 text-lg font-bold">
           <KeyRound className="h-5 w-5 text-primary" />
-          Kredensial Awal Mitra OS
+          {title}
         </DialogTitle>
       </DialogHeader>
       <DialogContent className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-muted/30 p-4">
           <div>
-            <p className="font-semibold text-foreground">{mitra.name}</p>
-            <p className="text-xs text-muted-foreground">
-              {mitra.mitraProfile?.idMitraOs ? `ID: ${mitra.mitraProfile.idMitraOs}` : "ID Belum diatur"}
-              {mitra.vendor?.name ? ` · ${mitra.vendor.name}` : ""}
-            </p>
+            <p className="font-semibold text-foreground">{name}</p>
+            {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
           </div>
-          <StatusBadge status={mitra.status} />
+          <StatusBadge status={status} />
         </div>
 
         <div className="space-y-3 rounded-xl border bg-card p-4 shadow-xs">
           <div className="space-y-1">
             <span className="text-[11px] font-medium text-muted-foreground block">Username / Email</span>
             <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/20 px-3 py-2">
-              <code className="text-sm font-medium text-foreground break-all">{mitra.email}</code>
+              <code className="text-sm font-medium text-foreground break-all">{username}</code>
               <Button
                 type="button"
                 size="sm"
                 variant="ghost"
                 className="h-7 shrink-0 gap-1 px-2 text-xs"
-                onClick={() => copyText("email", mitra.email)}
+                onClick={() => copyText("email", username)}
               >
                 {copiedField === "email" ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
                 {copiedField === "email" ? "Tersalin" : "Salin"}
@@ -709,13 +720,13 @@ function MitraCredentialDialog({
           <div className="space-y-1">
             <span className="text-[11px] font-medium text-muted-foreground block">Password Awal</span>
             <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/20 px-3 py-2">
-              <code className="text-sm font-semibold tracking-wide text-foreground break-all">{mitra.initialPassword}</code>
+              <code className="text-sm font-semibold tracking-wide text-foreground break-all">{password}</code>
               <Button
                 type="button"
                 size="sm"
                 variant="ghost"
                 className="h-7 shrink-0 gap-1 px-2 text-xs"
-                onClick={() => copyText("password", mitra.initialPassword || "")}
+                onClick={() => copyText("password", password)}
               >
                 {copiedField === "password" ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
                 {copiedField === "password" ? "Tersalin" : "Salin"}
@@ -724,16 +735,14 @@ function MitraCredentialDialog({
           </div>
         </div>
 
-        <p className="text-xs text-muted-foreground leading-relaxed">
-          Sampaikan kredensial awal ini kepada Mitra OS untuk login pertama kali, dan sarankan segera mengubah password setelah berhasil masuk.
-        </p>
+        <p className="text-xs text-muted-foreground leading-relaxed">{helperText}</p>
       </DialogContent>
       <DialogFooter>
         <Button
           type="button"
           variant="outline"
           className="gap-1.5"
-          onClick={() => copyText("both", `Username: ${mitra.email}\nPassword awal: ${mitra.initialPassword || ""}`)}
+          onClick={() => copyText("both", `Username: ${username}\nPassword awal: ${password}`)}
         >
           {copiedField === "both" ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
           {copiedField === "both" ? "Semua Tersalin" : "Salin Semua"}
@@ -1048,8 +1057,8 @@ function DocumentFileInput({
           selectedFile
             ? "border-blue-400 bg-blue-50/40 text-blue-900"
             : hasExisting
-            ? "border-green-300 bg-green-50/30 text-green-900"
-            : "border-input bg-background hover:bg-muted/40 text-muted-foreground"
+              ? "border-green-300 bg-green-50/30 text-green-900"
+              : "border-input bg-background hover:bg-muted/40 text-muted-foreground"
         )}
       >
         <div className="flex items-center gap-2 truncate">
@@ -2423,6 +2432,7 @@ export function VendorEmployeesPage() {
 export function VendorManagementPage() {
   const vendors = useApiData<Vendor[]>("/api/vendor", []);
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
+  const [credentialVendor, setCredentialVendor] = useState<Vendor | null>(null);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -2460,13 +2470,30 @@ export function VendorManagementPage() {
         <FormError error={error} />
         <LoadingError loading={vendors.loading} error={vendors.error} empty={!vendors.data.length} />
         {!vendors.loading && !vendors.error && vendors.data.length > 0 && (
-          <DataTable headers={["Nama Vendor", "Email", "Telepon", "Jumlah Mitra OS", "Status", "Alasan Remove", "Aksi"]}>
+          <DataTable headers={["Nama Vendor", "Email", "Telepon", "Jumlah Mitra OS", "Kredensial Awal", "Status", "Alasan Remove", "Aksi"]}>
             {vendors.data.map((vendor) => (
               <TableRow key={vendor.id}>
                 <TableCell className="font-medium">{vendor.name}</TableCell>
                 <TableCell>{vendor.email || "-"}</TableCell>
                 <TableCell>{vendor.phone || "-"}</TableCell>
                 <TableCell>{vendor._count?.users || 0}</TableCell>
+                <TableCell>
+                  {vendor.initialPassword ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-primary hover:text-primary hover:bg-primary/10 flex items-center gap-1.5 text-xs h-7 px-2.5 font-medium"
+                      onClick={() => setCredentialVendor(vendor)}
+                    >
+                      <KeyRound className="h-3.5 w-3.5" />
+                      Lihat
+                    </Button>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      {vendor.status === "PENDING" ? "Menunggu persetujuan" : "Tidak tersedia"}
+                    </span>
+                  )}
+                </TableCell>
                 <TableCell><StatusBadge status={vendor.status} /></TableCell>
                 <TableCell className="max-w-64 whitespace-normal">{vendor.removalReason || "-"}</TableCell>
                 <TableCell>
@@ -2522,6 +2549,18 @@ export function VendorManagementPage() {
             </form>
           </DialogContent>
         </Dialog>
+      )}
+      {credentialVendor && credentialVendor.initialPassword && (
+        <CredentialDialog
+          title="Kredensial Awal Vendor OS"
+          name={credentialVendor.name}
+          subtitle={credentialVendor.phone || credentialVendor.email || undefined}
+          status={credentialVendor.status}
+          username={credentialVendor.initialUsername || credentialVendor.email || ""}
+          password={credentialVendor.initialPassword}
+          helperText="Sampaikan kredensial awal ini kepada PIC Vendor OS untuk login pertama kali. Kredensial akan otomatis disembunyikan setelah vendor mengubah password."
+          onClose={() => setCredentialVendor(null)}
+        />
       )}
     </FeaturePage>
   );
@@ -2747,77 +2786,77 @@ function VendorCandidateForm({
                     ))
                   ));
                   return (
-                  <div className="space-y-3">
-                    <label className="block space-y-1 text-sm">
-                      Pilih karyawan<RequiredMark />
-                      <select
-                        className={fieldClass}
-                        value={candidate.employeeId}
-                        disabled={employees.loading || availableEmployees.length === 0}
-                        onChange={(event) => {
-                          const nextEmployeeId = event.target.value;
-                          setCandidates((current) => {
-                            const alreadyUsed = current.some((item, itemIndex) => (
-                              itemIndex !== index
-                              && item.source === "EMPLOYEE"
-                              && item.employeeId === nextEmployeeId
-                            ));
-                            if (nextEmployeeId && alreadyUsed) return current;
-                            return current.map((item, itemIndex) => (
-                              itemIndex === index ? { ...item, employeeId: nextEmployeeId } : item
-                            ));
-                          });
-                        }}
-                        required
-                      >
-                        <option value="">
-                          {employees.loading
-                            ? "Memuat data karyawan..."
-                            : employees.data.length === 0
-                              ? "Belum ada data karyawan tersedia"
-                              : availableEmployees.length === 0
-                                ? "Semua karyawan sudah dipilih di kandidat lain"
-                                : "Pilih karyawan"}
-                        </option>
-                        {availableEmployees.map((employee) => (
-                          <option key={employee.id} value={employee.id}>
-                            {employee.name} — {employee.nik}
+                    <div className="space-y-3">
+                      <label className="block space-y-1 text-sm">
+                        Pilih karyawan<RequiredMark />
+                        <select
+                          className={fieldClass}
+                          value={candidate.employeeId}
+                          disabled={employees.loading || availableEmployees.length === 0}
+                          onChange={(event) => {
+                            const nextEmployeeId = event.target.value;
+                            setCandidates((current) => {
+                              const alreadyUsed = current.some((item, itemIndex) => (
+                                itemIndex !== index
+                                && item.source === "EMPLOYEE"
+                                && item.employeeId === nextEmployeeId
+                              ));
+                              if (nextEmployeeId && alreadyUsed) return current;
+                              return current.map((item, itemIndex) => (
+                                itemIndex === index ? { ...item, employeeId: nextEmployeeId } : item
+                              ));
+                            });
+                          }}
+                          required
+                        >
+                          <option value="">
+                            {employees.loading
+                              ? "Memuat data karyawan..."
+                              : employees.data.length === 0
+                                ? "Belum ada data karyawan tersedia"
+                                : availableEmployees.length === 0
+                                  ? "Semua karyawan sudah dipilih di kandidat lain"
+                                  : "Pilih karyawan"}
                           </option>
-                        ))}
-                      </select>
-                    </label>
-                    {employees.error && <FormError error={`Data karyawan gagal dimuat: ${employees.error}`} />}
-                    {!employees.loading && employees.data.length === 0 && !employees.error && (
-                      <p className="text-sm text-muted-foreground">
-                        Belum ada data karyawan yang tersedia. Tambahkan melalui menu Data Karyawan.
-                      </p>
-                    )}
-                    {!employees.loading && employees.data.length > 0 && availableEmployees.length === 0 && !candidate.employeeId && !employees.error && (
-                      <p className="text-sm text-amber-700">
-                        Semua data karyawan yang tersedia sudah dipilih pada kandidat lain. Gunakan &ldquo;Isi data baru&rdquo; atau tambahkan karyawan baru di menu Data Karyawan.
-                      </p>
-                    )}
-                    {candidate.employeeId && (() => {
-                      const employee = employees.data.find((item) => item.id === candidate.employeeId);
-                      return employee ? (
-                        <div className="rounded-md bg-muted p-3 text-sm">
-                          <p>{employee.email} · {employee.phone}</p>
-                          <p>{[employee.provinsi, employee.kabKota, employee.kecamatan, employee.kelurahan, employee.alamat].filter(Boolean).join(", ")}</p>
-                        </div>
-                      ) : null;
-                    })()}
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <label className="space-y-1 text-sm">Hasil utama DISC<RequiredMark />
-                        <select className={fieldClass} value={candidate.discType} onChange={(event) => updateCandidate(index, "discType", event.target.value)} required>
-                          <option value="">Pilih tipe DISC</option>
-                          {["D", "I", "S", "C"].map((type) => <option key={type} value={type}>{type}</option>)}
+                          {availableEmployees.map((employee) => (
+                            <option key={employee.id} value={employee.id}>
+                              {employee.name} — {employee.nik}
+                            </option>
+                          ))}
                         </select>
                       </label>
-                      <label className="space-y-1 text-sm">Laporan DISC (PDF/JPG/PNG, maks. 5 MB)<RequiredMark />
-                        <input className={fieldClass} type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={(event) => updateCandidate(index, "discReport", event.target.files?.[0] || null)} required />
-                      </label>
+                      {employees.error && <FormError error={`Data karyawan gagal dimuat: ${employees.error}`} />}
+                      {!employees.loading && employees.data.length === 0 && !employees.error && (
+                        <p className="text-sm text-muted-foreground">
+                          Belum ada data karyawan yang tersedia. Tambahkan melalui menu Data Karyawan.
+                        </p>
+                      )}
+                      {!employees.loading && employees.data.length > 0 && availableEmployees.length === 0 && !candidate.employeeId && !employees.error && (
+                        <p className="text-sm text-amber-700">
+                          Semua data karyawan yang tersedia sudah dipilih pada kandidat lain. Gunakan &ldquo;Isi data baru&rdquo; atau tambahkan karyawan baru di menu Data Karyawan.
+                        </p>
+                      )}
+                      {candidate.employeeId && (() => {
+                        const employee = employees.data.find((item) => item.id === candidate.employeeId);
+                        return employee ? (
+                          <div className="rounded-md bg-muted p-3 text-sm">
+                            <p>{employee.email} · {employee.phone}</p>
+                            <p>{[employee.provinsi, employee.kabKota, employee.kecamatan, employee.kelurahan, employee.alamat].filter(Boolean).join(", ")}</p>
+                          </div>
+                        ) : null;
+                      })()}
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <label className="space-y-1 text-sm">Hasil utama DISC<RequiredMark />
+                          <select className={fieldClass} value={candidate.discType} onChange={(event) => updateCandidate(index, "discType", event.target.value)} required>
+                            <option value="">Pilih tipe DISC</option>
+                            {["D", "I", "S", "C"].map((type) => <option key={type} value={type}>{type}</option>)}
+                          </select>
+                        </label>
+                        <label className="space-y-1 text-sm">Laporan DISC (PDF/JPG/PNG, maks. 5 MB)<RequiredMark />
+                          <input className={fieldClass} type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={(event) => updateCandidate(index, "discReport", event.target.files?.[0] || null)} required />
+                        </label>
+                      </div>
                     </div>
-                  </div>
                   );
                 })() : (
                   <CandidateFields candidate={candidate} index={index} update={updateCandidate} includeDisc />
@@ -2932,45 +2971,45 @@ export function AccountApprovalPage() {
       )}
       {pendingAccounts.length > 0 && <Card><CardContent className="overflow-x-auto p-0">
         <h2 className="px-4 py-3 text-lg font-semibold">Akun Mitra OS Menunggu Persetujuan</h2>
-          <DataTable headers={["Tanggal", "Nama", "Email", "Telepon", "Vendor/Pemohon", "Request OS", "Detail Data", "Status", "Aksi"]}>
-            {pendingAccounts.map((item) => (
-              <TableRow key={item.id}>
-                <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString("id-ID") : "-"}</TableCell>
-                <TableCell>
-                  <p className="font-medium">{item.name}</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">Jenis akun: {item.type === "VENDOR" ? "Vendor OS" : "Mitra OS"}</p>
-                </TableCell>
-                <TableCell>{item.email}</TableCell>
-                <TableCell>{item.phone || "-"}</TableCell>
-                <TableCell>{item.vendorName || item.requester?.name || "-"}</TableCell>
-                <TableCell>{item.candidate ? `${getStatusLabel(item.candidate.osRequest.type)} · ${item.candidate.osRequest.jumlah} orang` : "-"}</TableCell>
-                <TableCell>
-                  {item.candidate ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="gap-1.5"
-                      onClick={() => setDetailRequest(item)}
-                    >
-                      <Eye className="h-3.5 w-3.5" />
-                      Lihat
-                    </Button>
-                  ) : "-"}
-                </TableCell>
-                <TableCell><StatusBadge status={item.status} /></TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap gap-2">
-                    <Button size="sm" disabled={busyId === item.id} onClick={() => decide(item.id, "APPROVED")}>
-                      {item.type === "VENDOR" ? "Aktifkan Akun Vendor" : "Aktivasi Akun"}
-                    </Button>
-                    <Button size="sm" variant="outline" disabled={busyId === item.id} onClick={() => decide(item.id, "REJECTED")}>
-                      Tolak
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))}
-          </DataTable>
+        <DataTable headers={["Tanggal", "Nama", "Email", "Telepon", "Vendor/Pemohon", "Request OS", "Detail Data", "Status", "Aksi"]}>
+          {pendingAccounts.map((item) => (
+            <TableRow key={item.id}>
+              <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString("id-ID") : "-"}</TableCell>
+              <TableCell>
+                <p className="font-medium">{item.name}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">Jenis akun: {item.type === "VENDOR" ? "Vendor OS" : "Mitra OS"}</p>
+              </TableCell>
+              <TableCell>{item.email}</TableCell>
+              <TableCell>{item.phone || "-"}</TableCell>
+              <TableCell>{item.vendorName || item.requester?.name || "-"}</TableCell>
+              <TableCell>{item.candidate ? `${getStatusLabel(item.candidate.osRequest.type)} · ${item.candidate.osRequest.jumlah} orang` : "-"}</TableCell>
+              <TableCell>
+                {item.candidate ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    onClick={() => setDetailRequest(item)}
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    Lihat
+                  </Button>
+                ) : "-"}
+              </TableCell>
+              <TableCell><StatusBadge status={item.status} /></TableCell>
+              <TableCell>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" disabled={busyId === item.id} onClick={() => decide(item.id, "APPROVED")}>
+                    {item.type === "VENDOR" ? "Aktifkan Akun Vendor" : "Aktivasi Akun"}
+                  </Button>
+                  <Button size="sm" variant="outline" disabled={busyId === item.id} onClick={() => decide(item.id, "REJECTED")}>
+                    Tolak
+                  </Button>
+                </div>
+              </TableCell>
+            </TableRow>
+          ))}
+        </DataTable>
       </CardContent></Card>}
       {detailRequest && detailRequest.candidate && (
         <CandidateAccountDetailDialog
@@ -3057,12 +3096,12 @@ function CandidateAccountDetailDialog({
 
   const domisiliAddress = candidate.domisiliSesuaiKtp === false
     ? [
-        candidate.domisiliProvinsi,
-        candidate.domisiliKabKota,
-        candidate.domisiliKecamatan,
-        candidate.domisiliKelurahan,
-        candidate.domisiliAlamat,
-      ].filter(Boolean).join(", ") || "-"
+      candidate.domisiliProvinsi,
+      candidate.domisiliKabKota,
+      candidate.domisiliKecamatan,
+      candidate.domisiliKelurahan,
+      candidate.domisiliAlamat,
+    ].filter(Boolean).join(", ") || "-"
     : "Sesuai dengan alamat KTP";
 
   const hasDocuments = Boolean(
@@ -3368,12 +3407,12 @@ export function ClaimsPage() {
 
   const hasActiveFilter = Boolean(
     searchQuery ||
-      filterVendorId !== "ALL" ||
-      filterStatus !== "ALL" ||
-      filterJenis !== "ALL" ||
-      filterBulan ||
-      filterStartDate ||
-      filterEndDate
+    filterVendorId !== "ALL" ||
+    filterStatus !== "ALL" ||
+    filterJenis !== "ALL" ||
+    filterBulan ||
+    filterStartDate ||
+    filterEndDate
   );
 
   function resetFilters() {
@@ -4492,99 +4531,99 @@ export function OSRequestPage() {
       {items.map((item) => {
         const targetMitras = resolveMitraTargets(item);
         return (
-        <TableRow key={item.id}>
-          <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString("id-ID") : "-"}</TableCell>
-          <TableCell>{item.type}</TableCell>
-          <TableCell>{item.jumlah}</TableCell>
-          <TableCell>
-            {targetMitras.length ? targetMitras.map((target) => target.id).join(", ") : "-"}
-          </TableCell>
-          <TableCell>{item.posisi || "-"}</TableCell>
-          <TableCell>{item.penempatan || "-"}</TableCell>
-          <TableCell>{item.waktuKerja || "-"}</TableCell>
-          <TableCell>{item.requester?.name || "-"}</TableCell>
-          <TableCell>
-            {session?.user.role === "VM" && item.status === "APPROVED_COO" ? (
-              <div className="flex min-w-48 gap-2">
-                <select
-                  className={fieldClass}
-                  value={selectedVendors[item.id] || ""}
-                  onChange={(event) => setSelectedVendors({ ...selectedVendors, [item.id]: event.target.value })}
-                >
-                  <option value="">Pilih vendor</option>
-                  {vendors.data.filter((vendor) => vendor.status === "ACTIVE").map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
-                </select>
-                <Button disabled={assigningId === item.id || vendors.loading} onClick={() => assignVendor(item.id)}>
-                  {assigningId === item.id ? "Menyimpan..." : "Pilih"}
-                </Button>
-              </div>
-            ) : item.vendor?.name || "-"}
-          </TableCell>
-          <TableCell><StatusBadge status={getOSRequestStatus(item.status)} /></TableCell>
-          <TableCell>
-            {session?.user.role === "SM" && getOSRequestStatus(item.status) === "OS_WAITING_SELECTION" ? (
-              <Button size="sm" variant="default" onClick={() => setActiveReviewRequestId(item.id)}>
-                Tinjau Kandidat
-              </Button>
-            ) : (
-              <Button size="sm" variant="outline" onClick={() => setActiveReviewRequestId(item.id)}>
-                Lihat Detail
-              </Button>
-            )}
-          </TableCell>
-          {session?.user.role === "VENDOR" && (
+          <TableRow key={item.id}>
+            <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString("id-ID") : "-"}</TableCell>
+            <TableCell>{item.type}</TableCell>
+            <TableCell>{item.jumlah}</TableCell>
             <TableCell>
-              {item.status === "VENDOR_SELECTED" ? (
-                <Button
-                  variant={activeCandidateRequestId === item.id ? "outline" : "default"}
-                  size="sm"
-                  onClick={() => setActiveCandidateRequestId(activeCandidateRequestId === item.id ? null : item.id)}
-                >
-                  {activeCandidateRequestId === item.id ? "Tutup" : "Isi data"}
+              {targetMitras.length ? targetMitras.map((target) => target.id).join(", ") : "-"}
+            </TableCell>
+            <TableCell>{item.posisi || "-"}</TableCell>
+            <TableCell>{item.penempatan || "-"}</TableCell>
+            <TableCell>{item.waktuKerja || "-"}</TableCell>
+            <TableCell>{item.requester?.name || "-"}</TableCell>
+            <TableCell>
+              {session?.user.role === "VM" && item.status === "APPROVED_COO" ? (
+                <div className="flex min-w-48 gap-2">
+                  <select
+                    className={fieldClass}
+                    value={selectedVendors[item.id] || ""}
+                    onChange={(event) => setSelectedVendors({ ...selectedVendors, [item.id]: event.target.value })}
+                  >
+                    <option value="">Pilih vendor</option>
+                    {vendors.data.filter((vendor) => vendor.status === "ACTIVE").map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
+                  </select>
+                  <Button disabled={assigningId === item.id || vendors.loading} onClick={() => assignVendor(item.id)}>
+                    {assigningId === item.id ? "Menyimpan..." : "Pilih"}
+                  </Button>
+                </div>
+              ) : item.vendor?.name || "-"}
+            </TableCell>
+            <TableCell><StatusBadge status={getOSRequestStatus(item.status)} /></TableCell>
+            <TableCell>
+              {session?.user.role === "SM" && getOSRequestStatus(item.status) === "OS_WAITING_SELECTION" ? (
+                <Button size="sm" variant="default" onClick={() => setActiveReviewRequestId(item.id)}>
+                  Tinjau Kandidat
                 </Button>
-              ) : item.status === "NOT_SELECTED" ? (
-                <StatusBadge status="OS_NOT_SELECTED" />
-              ) : item.status === "WAITING_SELECTION" || item.status === "IN_PROGRESS" ? (
-                <Button size="sm" variant="outline" disabled>Request akun</Button>
-              ) : item.status === "WAITING_VENDOR_REQUEST" ? (
-                (() => {
-                  const candidates = item.candidates || [];
-                  const hasUndecided = candidates.some((candidate) => candidate.status === "KANDIDAT");
-                  const selected = candidates.filter((candidate) => candidate.status === "TERPILIH");
-                  const hasMissingSkbn = selected.some((candidate) => !candidate.hasSkbn);
-                  if (selected.length > 0 && !hasUndecided) {
-                    if (hasMissingSkbn) {
+              ) : (
+                <Button size="sm" variant="outline" onClick={() => setActiveReviewRequestId(item.id)}>
+                  Lihat Detail
+                </Button>
+              )}
+            </TableCell>
+            {session?.user.role === "VENDOR" && (
+              <TableCell>
+                {item.status === "VENDOR_SELECTED" ? (
+                  <Button
+                    variant={activeCandidateRequestId === item.id ? "outline" : "default"}
+                    size="sm"
+                    onClick={() => setActiveCandidateRequestId(activeCandidateRequestId === item.id ? null : item.id)}
+                  >
+                    {activeCandidateRequestId === item.id ? "Tutup" : "Isi data"}
+                  </Button>
+                ) : item.status === "NOT_SELECTED" ? (
+                  <StatusBadge status="OS_NOT_SELECTED" />
+                ) : item.status === "WAITING_SELECTION" || item.status === "IN_PROGRESS" ? (
+                  <Button size="sm" variant="outline" disabled>Request akun</Button>
+                ) : item.status === "WAITING_VENDOR_REQUEST" ? (
+                  (() => {
+                    const candidates = item.candidates || [];
+                    const hasUndecided = candidates.some((candidate) => candidate.status === "KANDIDAT");
+                    const selected = candidates.filter((candidate) => candidate.status === "TERPILIH");
+                    const hasMissingSkbn = selected.some((candidate) => !candidate.hasSkbn);
+                    if (selected.length > 0 && !hasUndecided) {
+                      if (hasMissingSkbn) {
+                        return (
+                          <Button size="sm" onClick={() => setActiveSkbnRequestId(item.id)}>
+                            Unggah SKBN
+                          </Button>
+                        );
+                      }
                       return (
-                        <Button size="sm" onClick={() => setActiveSkbnRequestId(item.id)}>
-                          Unggah SKBN
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            disabled={candidateActionId === item.id}
+                            onClick={() => requestCandidateAccounts(item.id)}
+                          >
+                            {candidateActionId === item.id ? "Mengirim..." : "Request akun"}
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => setActiveSkbnRequestId(item.id)}>
+                            Lihat SKBN
+                          </Button>
+                        </div>
                       );
                     }
-                    return (
-                      <div className="flex items-center gap-2">
-                        <Button
-                          size="sm"
-                          disabled={candidateActionId === item.id}
-                          onClick={() => requestCandidateAccounts(item.id)}
-                        >
-                          {candidateActionId === item.id ? "Mengirim..." : "Request akun"}
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => setActiveSkbnRequestId(item.id)}>
-                          Lihat SKBN
-                        </Button>
-                      </div>
-                    );
-                  }
-                  return <Button size="sm" variant="outline" disabled>Menunggu Hasil Seleksi</Button>;
-                })()
-              ) : item.status === "WAITING_ACTIVATION" ? (
-                <Button size="sm" variant="outline" disabled>Menunggu Aktivasi Akun</Button>
-              ) : item.status === "COMPLETED" ? (
-                <StatusBadge status="COMPLETED" />
-              ) : "-"}
-            </TableCell>
-          )}
-        </TableRow>
+                    return <Button size="sm" variant="outline" disabled>Menunggu Hasil Seleksi</Button>;
+                  })()
+                ) : item.status === "WAITING_ACTIVATION" ? (
+                  <Button size="sm" variant="outline" disabled>Menunggu Aktivasi Akun</Button>
+                ) : item.status === "COMPLETED" ? (
+                  <StatusBadge status="COMPLETED" />
+                ) : "-"}
+              </TableCell>
+            )}
+          </TableRow>
         );
       })}
     </DataTable>
@@ -4606,213 +4645,211 @@ export function OSRequestPage() {
           >
             <DialogHeader><DialogTitle>Buat Request OS</DialogTitle></DialogHeader>
             <DialogContent>
-          <p className="mb-4 text-sm text-muted-foreground">Field bertanda <RequiredMark /> wajib diisi.</p>
-          <form id="os-request-form" onSubmit={submit} className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-1 text-sm">
-              Jenis Permintaan<RequiredMark />
-              <select
-                className={fieldClass}
-                name="type"
-                value={requestType}
-                onChange={(event) => {
-                  setRequestType(event.target.value);
-                  setSelectedMitraIds([""]);
-                  setSelectedMitraOffice("");
-                  setRequestQuantity(1);
-                  setRequestPosition("");
-                  setRequestPlacement("");
-                  setRequestWorkHours("");
-                }}
-              >
-                <option value="PENAMBAHAN">Penambahan</option>
-                <option value="PERGANTIAN">Pergantian</option>
-                <option value="PENGURANGAN">Pengurangan</option>
-              </select>
-            </label>
-            <label className="space-y-1 text-sm">
-              Jumlah<RequiredMark />
-              <input
-                className={fieldClass}
-                type="number"
-                min="1"
-                max="10"
-                name="jumlah"
-                value={requestQuantity}
-                onChange={(event) => resizeMitraTargets(Number(event.target.value))}
-                required
-              />
-            </label>
-            {needsMitraId ? (
-              <div className="space-y-4 md:col-span-2">
-                <label className="block max-w-md space-y-1 text-sm">
-                  Kode Kantor<RequiredMark />
+              <p className="mb-4 text-sm text-muted-foreground">Field bertanda <RequiredMark /> wajib diisi.</p>
+              <form id="os-request-form" onSubmit={submit} className="grid gap-4 md:grid-cols-2">
+                <label className="space-y-1 text-sm">
+                  Jenis Permintaan<RequiredMark />
                   <select
                     className={fieldClass}
-                    value={selectedMitraOffice}
+                    name="type"
+                    value={requestType}
                     onChange={(event) => {
-                      setSelectedMitraOffice(event.target.value);
-                      setSelectedMitraIds(Array.from({ length: requestQuantity }, () => ""));
+                      setRequestType(event.target.value);
+                      setSelectedMitraIds([""]);
+                      setSelectedMitraOffice("");
+                      setRequestQuantity(1);
                       setRequestPosition("");
-                      setRequestPlacement(event.target.value);
+                      setRequestPlacement("");
                       setRequestWorkHours("");
                     }}
-                    required
                   >
-                    <option value="">Pilih kode kantor</option>
-                    {["kantor1", "kantor2", "kantor3"].map((office) => (
-                      <option key={office} value={office}>{office}</option>
-                    ))}
+                    <option value="PENAMBAHAN">Penambahan</option>
+                    <option value="PERGANTIAN">Pergantian</option>
+                    <option value="PENGURANGAN">Pengurangan</option>
                   </select>
                 </label>
-                {selectedMitraIds.map((id, index) => {
-                  const selected = mitras.data.find((mitra) => mitra.mitraProfile?.idMitraOs === id);
-                  return (
-                    <div key={index} className="grid gap-3 rounded-md border p-3 md:grid-cols-2">
-                      <label className="space-y-1 text-sm">
-                        Nama Mitra OS {index + 1}<RequiredMark />
-                        <select
-                          id={`mitraOs-${index}`}
-                          className={fieldClass}
-                          value={id}
-                          disabled={!selectedMitraOffice || mitras.loading}
-                          onChange={(event) => updateMitraTarget(index, event.target.value)}
-                          required
-                        >
-                          <option value="">
-                            {!selectedMitraOffice
-                              ? "Pilih kode kantor terlebih dahulu"
-                              : mitras.loading ? "Memuat data Mitra OS..." : "Pilih nama Mitra OS"}
-                          </option>
-                          {mitras.data
-                            .filter((mitra) => mitra.status === "ACTIVE")
-                            .filter((mitra) => mitra.mitraProfile?.penempatan === selectedMitraOffice)
-                            .filter((mitra) => !selectedMitraIds.some(
-                              (selectedId, selectedIndex) => selectedIndex !== index
-                                && selectedId === mitra.mitraProfile?.idMitraOs,
-                            ))
-                            .map((mitra) => (
-                              <option key={mitra.id} value={mitra.mitraProfile?.idMitraOs || ""}>
-                                {mitra.name} — {mitra.mitraProfile?.idMitraOs}
+                <label className="space-y-1 text-sm">
+                  Jumlah<RequiredMark />
+                  <input
+                    className={fieldClass}
+                    type="number"
+                    min="1"
+                    max="10"
+                    name="jumlah"
+                    value={requestQuantity}
+                    onChange={(event) => resizeMitraTargets(Number(event.target.value))}
+                    required
+                  />
+                </label>
+                {needsMitraId ? (
+                  <div className="space-y-4 md:col-span-2">
+                    <label className="block max-w-md space-y-1 text-sm">
+                      Kode Kantor<RequiredMark />
+                      <select
+                        className={fieldClass}
+                        value={selectedMitraOffice}
+                        onChange={(event) => {
+                          setSelectedMitraOffice(event.target.value);
+                          setSelectedMitraIds(Array.from({ length: requestQuantity }, () => ""));
+                          setRequestPosition("");
+                          setRequestPlacement(event.target.value);
+                          setRequestWorkHours("");
+                        }}
+                        required
+                      >
+                        <option value="">Pilih kode kantor</option>
+                        {["kantor1", "kantor2", "kantor3"].map((office) => (
+                          <option key={office} value={office}>{office}</option>
+                        ))}
+                      </select>
+                    </label>
+                    {selectedMitraIds.map((id, index) => {
+                      const selected = mitras.data.find((mitra) => mitra.mitraProfile?.idMitraOs === id);
+                      return (
+                        <div key={index} className="grid gap-3 rounded-md border p-3 md:grid-cols-2">
+                          <label className="space-y-1 text-sm">
+                            Nama Mitra OS {index + 1}<RequiredMark />
+                            <select
+                              id={`mitraOs-${index}`}
+                              className={fieldClass}
+                              value={id}
+                              disabled={!selectedMitraOffice || mitras.loading}
+                              onChange={(event) => updateMitraTarget(index, event.target.value)}
+                              required
+                            >
+                              <option value="">
+                                {!selectedMitraOffice
+                                  ? "Pilih kode kantor terlebih dahulu"
+                                  : mitras.loading ? "Memuat data Mitra OS..." : "Pilih nama Mitra OS"}
                               </option>
-                            ))}
-                        </select>
-                      </label>
-                      <div className="rounded-md bg-muted p-3 text-sm">
-                        {selected ? (
-                          <>
-                            <p><span className="font-medium">Posisi:</span> {selected.mitraProfile?.posisi || "-"}</p>
-                            <p><span className="font-medium">Wilayah:</span> {selected.mitraProfile?.penempatan || "-"}</p>
-                            <p><span className="font-medium">Waktu kerja:</span> {selected.mitraProfile?.waktuKerja || "-"}</p>
-                          </>
-                        ) : (
-                          <p className="text-muted-foreground">Pilih Mitra OS untuk mengisi detail otomatis.</p>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
+                              {mitras.data
+                                .filter((mitra) => mitra.status === "ACTIVE")
+                                .filter((mitra) => mitra.mitraProfile?.penempatan === selectedMitraOffice)
+                                .filter((mitra) => !selectedMitraIds.some(
+                                  (selectedId, selectedIndex) => selectedIndex !== index
+                                    && selectedId === mitra.mitraProfile?.idMitraOs,
+                                ))
+                                .map((mitra) => (
+                                  <option key={mitra.id} value={mitra.mitraProfile?.idMitraOs || ""}>
+                                    {mitra.name} — {mitra.mitraProfile?.idMitraOs}
+                                  </option>
+                                ))}
+                            </select>
+                          </label>
+                          <div className="rounded-md bg-muted p-3 text-sm">
+                            {selected ? (
+                              <>
+                                <p><span className="font-medium">Posisi:</span> {selected.mitraProfile?.posisi || "-"}</p>
+                                <p><span className="font-medium">Wilayah:</span> {selected.mitraProfile?.penempatan || "-"}</p>
+                                <p><span className="font-medium">Waktu kerja:</span> {selected.mitraProfile?.waktuKerja || "-"}</p>
+                              </>
+                            ) : (
+                              <p className="text-muted-foreground">Pilih Mitra OS untuk mengisi detail otomatis.</p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div aria-hidden="true" className="min-h-[65px]" />
+                )}
+                {!needsMitraId && (
+                  <>
+                    <label className="space-y-1 text-sm">
+                      Posisi Kebutuhan<RequiredMark />
+                      <select className={fieldClass} name="posisi" required value={requestPosition} onChange={(event) => setRequestPosition(event.target.value)}>
+                        <option value="" disabled>Pilih posisi</option>
+                        <option value="OS001: Sorter">OS001: Sorter</option>
+                        <option value="OS002: Driver Delivery & Pickup">OS002: Driver Delivery &amp; Pickup</option>
+                        <option value="OS003: Kurir Perpaket">OS003: Kurir Perpaket</option>
+                        <option value="OS004: Kurir Dedicated">OS004: Kurir Dedicated</option>
+                        <option value="OS005: Driver Ondemand">OS005: Driver Ondemand</option>
+                      </select>
+                    </label>
+                    <label className="space-y-1 text-sm">
+                      Wilayah Operasional<RequiredMark />
+                      <select className={fieldClass} name="penempatan" required value={requestPlacement} onChange={(event) => setRequestPlacement(event.target.value)}>
+                        <option value="" disabled>Pilih wilayah</option>
+                        <option value="kantor1">kantor1</option>
+                        <option value="kantor2">kantor2</option>
+                        <option value="kantor3">kantor3</option>
+                      </select>
+                    </label>
+                    <label className="space-y-1 text-sm">
+                      Waktu Kerja<RequiredMark />
+                      <select className={fieldClass} name="waktuKerja" required value={requestWorkHours} onChange={(event) => setRequestWorkHours(event.target.value)}>
+                        <option value="" disabled>Pilih waktu kerja</option>
+                        <option value="08:00-17:00">08:00-17:00</option>
+                        <option value="20:00-05:00">20:00-05:00</option>
+                      </select>
+                    </label>
+                  </>
+                )}
+                <label className="space-y-1 text-sm md:col-span-2">
+                  Alasan permintaan<RequiredMark />
+                  <textarea
+                    className={fieldClass}
+                    name="alasan"
+                    rows={3}
+                    maxLength={2000}
+                    required
+                    placeholder={
+                      requestType === "PENAMBAHAN"
+                        ? "Tuliskan alasan kebutuhan penambahan tenaga OS..."
+                        : requestType === "PERGANTIAN"
+                          ? "Tuliskan alasan pergantian mitra OS..."
+                          : "Tuliskan alasan pengurangan mitra OS..."
+                    }
+                  />
+                </label>
+                <FormError error={error} />
+                {needsMitraId && mitras.error && <FormError error={`Data Mitra OS gagal dimuat: ${mitras.error}`} />}
+              </form>
+              <div className="mt-6 flex justify-end border-t pt-4">
+                <div className="flex gap-2">
+                  <Button type="button" variant="outline" disabled={saving} onClick={() => setRequestFormOpen(false)}>
+                    Batal
+                  </Button>
+                  <Button type="submit" form="os-request-form" disabled={saving || (needsMitraId && mitras.loading)}>
+                    {saving ? "Mengirim..." : "Kirim Request"}
+                  </Button>
+                </div>
               </div>
-            ) : (
-              <div aria-hidden="true" className="min-h-[65px]" />
-            )}
-            {!needsMitraId && (
-              <>
-                <label className="space-y-1 text-sm">
-                  Posisi Kebutuhan<RequiredMark />
-                  <select className={fieldClass} name="posisi" required value={requestPosition} onChange={(event) => setRequestPosition(event.target.value)}>
-                    <option value="" disabled>Pilih posisi</option>
-                    <option value="OS001: Sorter">OS001: Sorter</option>
-                    <option value="OS002: Driver Delivery & Pickup">OS002: Driver Delivery &amp; Pickup</option>
-                    <option value="OS003: Kurir Perpaket">OS003: Kurir Perpaket</option>
-                    <option value="OS004: Kurir Dedicated">OS004: Kurir Dedicated</option>
-                    <option value="OS005: Driver Ondemand">OS005: Driver Ondemand</option>
-                  </select>
-                </label>
-                <label className="space-y-1 text-sm">
-                  Wilayah Operasional<RequiredMark />
-                  <select className={fieldClass} name="penempatan" required value={requestPlacement} onChange={(event) => setRequestPlacement(event.target.value)}>
-                    <option value="" disabled>Pilih wilayah</option>
-                    <option value="kantor1">kantor1</option>
-                    <option value="kantor2">kantor2</option>
-                    <option value="kantor3">kantor3</option>
-                  </select>
-                </label>
-                <label className="space-y-1 text-sm">
-                  Waktu Kerja<RequiredMark />
-                  <select className={fieldClass} name="waktuKerja" required value={requestWorkHours} onChange={(event) => setRequestWorkHours(event.target.value)}>
-                    <option value="" disabled>Pilih waktu kerja</option>
-                    <option value="08:00-17:00">08:00-17:00</option>
-                    <option value="20:00-05:00">20:00-05:00</option>
-                  </select>
-                </label>
-              </>
-            )}
-            <label className="space-y-1 text-sm md:col-span-2">
-              Alasan permintaan<RequiredMark />
-              <textarea
-                className={fieldClass}
-                name="alasan"
-                rows={3}
-                maxLength={2000}
-                required
-                placeholder={
-                  requestType === "PENAMBAHAN"
-                    ? "Tuliskan alasan kebutuhan penambahan tenaga OS..."
-                    : requestType === "PERGANTIAN"
-                      ? "Tuliskan alasan pergantian mitra OS..."
-                      : "Tuliskan alasan pengurangan mitra OS..."
-                }
-              />
-            </label>
-            <FormError error={error} />
-            {needsMitraId && mitras.error && <FormError error={`Data Mitra OS gagal dimuat: ${mitras.error}`} />}
-          </form>
-          <div className="mt-6 flex justify-end border-t pt-4">
-            <div className="flex gap-2">
-              <Button type="button" variant="outline" disabled={saving} onClick={() => setRequestFormOpen(false)}>
-                Batal
-              </Button>
-              <Button type="submit" form="os-request-form" disabled={saving || (needsMitraId && mitras.loading)}>
-                {saving ? "Mengirim..." : "Kirim Request"}
-              </Button>
-            </div>
-          </div>
             </DialogContent>
           </Dialog>
         </>
       )}
       {session?.user.role === "VENDOR" && recentVendorNotifications.length > 0 && (
         <Card>
-          <details>
-          <summary className="cursor-pointer list-none px-6 py-4">
-            <span className="font-semibold">Pemberitahuan Mitra OS ({recentVendorNotifications.length})</span>
-            <span className="ml-2 text-sm text-muted-foreground">Request penambahan, pergantian, atau pengurangan · 14 hari terakhir</span>
-          </summary>
-          <CardContent className="space-y-2 border-t text-sm">
+          <CardHeader>
+            <CardTitle className="text-lg">Pemberitahuan Mitra OS</CardTitle>
+            <p className="text-sm text-muted-foreground">Request penambahan, pergantian, atau pengurangan dalam 14 hari terakhir.</p>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm">
             {recentVendorNotifications.map((item) => {
-                const targetMitras = (item.mitraTargets || []).map((profileId) =>
-                  mitras.data.find((mitra) => mitra.mitraProfile?.id === profileId),
-                );
-                return (
-                  <div key={item.id} className="rounded-md border p-3">
-                    <p className="font-medium">{item.type} · {item.jumlah} mitra</p>
-                    <p className="text-muted-foreground">
-                      {item.vendorNotifiedAt && new Date(item.vendorNotifiedAt).toLocaleDateString("id-ID")}
-                      {" · "}{getOSRequestStatus(item.status)}
-                    </p>
-                    <p className="mt-1">
-                      Mitra terkait: {targetMitras.length > 0
-                        ? targetMitras.map((mitra) => (
-                          `${mitra?.name || "Mitra"} (${mitra?.mitraProfile?.idMitraOs || item.idMitraOs || "-"})`
-                        )).join(", ")
-                        : item.idMitraOs || "-"}
-                    </p>
-                    <p>Alasan: {item.alasan || "Tidak dicantumkan"}</p>
-                  </div>
-                );
-              })}
+              const targetMitras = (item.mitraTargets || []).map((profileId) =>
+                mitras.data.find((mitra) => mitra.mitraProfile?.id === profileId),
+              );
+              return (
+                <div key={item.id} className="rounded-md border p-3">
+                  <p className="font-medium">{item.type} · {item.jumlah} mitra</p>
+                  <p className="text-muted-foreground">
+                    {item.vendorNotifiedAt && new Date(item.vendorNotifiedAt).toLocaleDateString("id-ID")}
+                    {" · "}{getOSRequestStatus(item.status)}
+                  </p>
+                  <p className="mt-1">
+                    Mitra terkait: {targetMitras.length > 0
+                      ? targetMitras.map((mitra) => (
+                        `${mitra?.name || "Mitra"} (${mitra?.mitraProfile?.idMitraOs || item.idMitraOs || "-"})`
+                      )).join(", ")
+                      : item.idMitraOs || "-"}
+                  </p>
+                  <p>Alasan: {item.alasan || "Tidak dicantumkan"}</p>
+                </div>
+              );
+            })}
           </CardContent>
-          </details>
         </Card>
       )}
       {["SM", "VENDOR", "VM"].includes(session?.user.role || "") ? (
