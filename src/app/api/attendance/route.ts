@@ -5,6 +5,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getShiftEndAt } from "@/lib/attendance-shift";
 import { getMitraShift } from "@/lib/mitra-shift";
+import { queryAttendances } from "@/lib/attendance-query";
 
 export async function GET(req: NextRequest) {
   try {
@@ -14,94 +15,8 @@ export async function GET(req: NextRequest) {
     }
 
     const { searchParams } = new URL(req.url);
-    const userId = searchParams.get("userId");
-    const month = searchParams.get("month"); // format: YYYY-MM
-    const vendorId = searchParams.get("vendorId");
-
-    let where: any = {};
-
-    if (session.user.role === "MITRA") {
-      where.userId = session.user.id;
-    } else if (session.user.role === "VENDOR") {
-      where.user = { vendorId: session.user.vendorId };
-    } else if (session.user.role === "VM") {
-      if (vendorId) where.user = { vendorId };
-      if (userId) where.userId = userId;
-    }
-
-    if (month) {
-      const [year, m] = month.split("-").map(Number);
-      where.date = {
-        gte: new Date(year, m - 1, 1),
-        lt: new Date(year, m, 1),
-      };
-    }
-
-    const attendances = await prisma.attendance.findMany({
-      where,
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            vendorId: true,
-            mitraProfile: { select: { waktuKerja: true, idMitraOs: true, status: true, posisi: true, penempatan: true } },
-          },
-        },
-      },
-      orderBy: { date: "desc" },
-      take: month ? 5000 : 100,
-    });
-
-    if (session.user.role === "MITRA" && month) {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      yesterday.setHours(0, 0, 0, 0);
-      const openAttendance = await prisma.attendance.findFirst({
-        where: {
-          userId: session.user.id,
-          date: { gte: yesterday },
-          checkIn: { not: null },
-          checkOut: null,
-        },
-        include: {
-          user: {
-            select: {
-              id: true,
-              name: true,
-              email: true,
-              vendorId: true,
-              mitraProfile: { select: { waktuKerja: true, idMitraOs: true, status: true, posisi: true, penempatan: true } },
-            },
-          },
-        },
-        orderBy: { date: "desc" },
-      });
-      if (openAttendance && !attendances.some(({ id }) => id === openAttendance.id)) {
-        attendances.push(openAttendance);
-        attendances.sort((first, second) => second.date.getTime() - first.date.getTime());
-      }
-    }
-
-    const checkoutLocations = attendances.length
-      ? await prisma.$queryRaw<Array<{
-          id: string;
-          latitudeCheckOut: number | null;
-          longitudeCheckOut: number | null;
-        }>>(Prisma.sql`
-          SELECT id, latitudeCheckOut, longitudeCheckOut
-          FROM Attendance
-          WHERE id IN (${Prisma.join(attendances.map(({ id }) => id))})
-        `)
-      : [];
-    const checkoutLocationById = new Map(checkoutLocations.map((location) => [location.id, location]));
-
-    return NextResponse.json(attendances.map((attendance) => ({
-      ...attendance,
-      latitudeCheckOut: checkoutLocationById.get(attendance.id)?.latitudeCheckOut ?? null,
-      longitudeCheckOut: checkoutLocationById.get(attendance.id)?.longitudeCheckOut ?? null,
-    })));
+    const records = await queryAttendances(session.user, searchParams);
+    return NextResponse.json(records);
   } catch (error) {
     console.error("Attendance GET error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });

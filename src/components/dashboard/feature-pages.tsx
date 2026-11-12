@@ -219,12 +219,14 @@ interface Region {
 
 interface Claim {
   id: string;
+  vendorId?: string;
   createdAt?: string;
   bulan: string;
   jenisClaim: string;
   jumlahMitra: number;
   nominal: number;
   status: string;
+  catatan?: string | null;
   hasDokumen: boolean;
   dokumenNama?: string | null;
   vendor?: { name: string };
@@ -2766,24 +2768,52 @@ export function AccountApprovalPage() {
   );
 }
 
+function formatPeriodMonth(bulan: string): string {
+  if (!bulan) return "-";
+  const parts = bulan.split("-");
+  if (parts.length < 2) return bulan;
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  if (isNaN(year) || isNaN(month)) return bulan;
+  const date = new Date(year, month - 1, 1);
+  return date.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+}
+
+function toLocalYmd(value?: string | null): string {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+async function readUploadDataUrl(file: File, label = "File"): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") resolve(reader.result);
+      else reject(new Error(`${label} gagal dibaca.`));
+    };
+    reader.onerror = () => reject(new Error(`${label} gagal dibaca.`));
+    reader.readAsDataURL(file);
+  });
+}
+
 export function ClaimsPage() {
   const { data: session } = useSession();
   const claims = useApiData<Claim[]>("/api/claim", []);
   const vendors = useApiData<Vendor[]>("/api/vendor", []);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [uploadModalOpen, setUploadModalOpen] = useState(false);
 
-  async function readDocument(file: File) {
-    return new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") resolve(reader.result);
-        else reject(new Error("Dokumen gagal dibaca."));
-      };
-      reader.onerror = () => reject(new Error("Dokumen gagal dibaca."));
-      reader.readAsDataURL(file);
-    });
-  }
+  // Filter states
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterVendorId, setFilterVendorId] = useState("ALL");
+  const [filterStatus, setFilterStatus] = useState("ALL");
+  const [filterJenis, setFilterJenis] = useState("ALL");
+  const [filterBulan, setFilterBulan] = useState("");
+  const [filterStartDate, setFilterStartDate] = useState("");
+  const [filterEndDate, setFilterEndDate] = useState("");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2809,10 +2839,10 @@ export function ClaimsPage() {
         jumlahMitra: Number(form.get("jumlahMitra")),
         nominal: Number(form.get("nominal")),
         catatan: form.get("catatan"),
-        dokumen: await readDocument(file),
+        dokumen: await readUploadDataUrl(file, "Dokumen klaim"),
         dokumenNama: file.name,
       });
-      formElement.reset();
+      setUploadModalOpen(false);
       claims.reload();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Gagal mengirim klaim.");
@@ -2821,50 +2851,387 @@ export function ClaimsPage() {
     }
   }
 
+  const jenisOptions = Array.from(
+    new Set(claims.data.map((item) => item.jenisClaim.trim()).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b, "id"));
+
+  const [normalizedStart, normalizedEnd] =
+    filterStartDate && filterEndDate && filterStartDate > filterEndDate
+      ? [filterEndDate, filterStartDate]
+      : [filterStartDate, filterEndDate];
+
+  const filteredClaims = claims.data.filter((item) => {
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      const matchJenis = item.jenisClaim.toLowerCase().includes(q);
+      const matchVendor = (item.vendor?.name || "").toLowerCase().includes(q);
+      const matchCatatan = (item.catatan || "").toLowerCase().includes(q);
+      if (!matchJenis && !matchVendor && !matchCatatan) return false;
+    }
+    if (filterVendorId !== "ALL" && item.vendorId !== filterVendorId) {
+      return false;
+    }
+    if (filterStatus !== "ALL" && item.status !== filterStatus) {
+      return false;
+    }
+    if (filterJenis !== "ALL" && item.jenisClaim !== filterJenis) {
+      return false;
+    }
+    if (filterBulan && item.bulan !== filterBulan) {
+      return false;
+    }
+    if (normalizedStart || normalizedEnd) {
+      const itemDate = toLocalYmd(item.createdAt);
+      if (!itemDate) return false;
+      if (normalizedStart && itemDate < normalizedStart) return false;
+      if (normalizedEnd && itemDate > normalizedEnd) return false;
+    }
+    return true;
+  });
+
+  const hasActiveFilter = Boolean(
+    searchQuery ||
+      filterVendorId !== "ALL" ||
+      filterStatus !== "ALL" ||
+      filterJenis !== "ALL" ||
+      filterBulan ||
+      filterStartDate ||
+      filterEndDate
+  );
+
+  function resetFilters() {
+    setSearchQuery("");
+    setFilterVendorId("ALL");
+    setFilterStatus("ALL");
+    setFilterJenis("ALL");
+    setFilterBulan("");
+    setFilterStartDate("");
+    setFilterEndDate("");
+  }
+
+  const totalClaimsCount = claims.data.length;
+  const activeClaims = claims.data.filter((c) => c.status !== "REJECTED");
+  const activeClaimsCount = activeClaims.length;
+  const totalMitraAffected = activeClaims.reduce((sum, c) => sum + (c.jumlahMitra || 0), 0);
+  const totalNominalKlaim = activeClaims.reduce((sum, c) => sum + (c.nominal || 0), 0);
+
   return (
-    <FeaturePage title="Daftar Klaim" description="VM mengunggah data klaim beserta dokumennya. Vendor dapat melihat klaim miliknya." roles={["VENDOR", "VM"]}>
-      {session?.user.role === "VM" && (
-        <Card><CardHeader><CardTitle className="text-lg">Upload Data Klaim</CardTitle></CardHeader><CardContent>
-          <form onSubmit={submit} className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-1 text-sm">Vendor<RequiredMark />
-              <select className={fieldClass} name="vendorId" required defaultValue="">
-                <option value="" disabled>Pilih vendor</option>
-                {vendors.data.filter((vendor) => vendor.status === "ACTIVE").map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
+    <FeaturePage
+      title="Daftar Klaim"
+      description="Kelola data klaim operasional mitra serta rincian potongan tagihan per vendor."
+      roles={["VENDOR", "VM"]}
+    >
+      {!uploadModalOpen && <FormError error={error} />}
+
+      {/* Ringkasan Daftar Klaim */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <div className="bg-card rounded-xl border p-4 shadow-xs space-y-1">
+          <p className="text-xs text-muted-foreground font-medium">Total Data Klaim</p>
+          <p className="text-2xl font-bold text-foreground">{totalClaimsCount}</p>
+        </div>
+        <div className="bg-card rounded-xl border p-4 shadow-xs space-y-1">
+          <p className="text-xs text-blue-600 font-medium">Klaim Aktif</p>
+          <p className="text-2xl font-bold text-blue-600">{activeClaimsCount}</p>
+        </div>
+        <div className="bg-card rounded-xl border p-4 shadow-xs space-y-1">
+          <p className="text-xs text-green-600 font-medium">Total Mitra Terdampak</p>
+          <p className="text-2xl font-bold text-green-600">{totalMitraAffected}</p>
+        </div>
+        <div className="bg-card rounded-xl border p-4 shadow-xs space-y-1">
+          <p className="text-xs text-primary font-medium">Total Nominal Klaim</p>
+          <p className="text-lg sm:text-xl font-bold text-primary truncate" title={formatCurrency(totalNominalKlaim)}>
+            {formatCurrency(totalNominalKlaim)}
+          </p>
+        </div>
+      </div>
+
+      {/* Toolbar: Filter & Tombol Upload Klaim */}
+      <div className="flex flex-col gap-3 bg-card p-4 rounded-xl border shadow-xs">
+        <div className="flex flex-col lg:flex-row gap-3 items-stretch lg:items-center justify-between">
+          <div className="flex flex-wrap items-center gap-2.5 flex-1">
+            {/* Pencarian */}
+            <div className="relative min-w-44 sm:min-w-56 flex-1 sm:flex-initial">
+              <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Cari jenis klaim / vendor / catatan..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className={cn(fieldClass, "pl-9 text-xs h-9")}
+              />
+            </div>
+
+            {/* Filter Vendor (untuk VM) */}
+            {session?.user.role !== "VENDOR" && (
+              <div className="min-w-40">
+                <select
+                  value={filterVendorId}
+                  onChange={(e) => setFilterVendorId(e.target.value)}
+                  className={cn(fieldClass, "text-xs h-9")}
+                >
+                  <option value="ALL">Semua Vendor</option>
+                  {vendors.data.map((vendor) => (
+                    <option key={vendor.id} value={vendor.id}>
+                      {vendor.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Filter Status */}
+            <div className="min-w-36">
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className={cn(fieldClass, "text-xs h-9")}
+              >
+                <option value="ALL">Semua Status</option>
+                <option value="SUBMITTED">Diajukan</option>
+                <option value="APPROVED">Disetujui</option>
+                <option value="REJECTED">Ditolak</option>
               </select>
-            </label>
-            <label className="space-y-1 text-sm">Bulan<RequiredMark /><input className={fieldClass} type="month" name="bulan" required /></label>
-            <label className="space-y-1 text-sm">Jenis klaim<RequiredMark /><input className={fieldClass} name="jenisClaim" placeholder="GAJI, BPJS, LEMBUR..." required /></label>
-            <label className="space-y-1 text-sm">Jumlah mitra<RequiredMark /><input className={fieldClass} type="number" min="1" name="jumlahMitra" required /></label>
-            <label className="space-y-1 text-sm">Nominal total<RequiredMark /><input className={fieldClass} type="number" min="0" step="any" name="nominal" required /></label>
-            <label className="space-y-1 text-sm md:col-span-2">Catatan<OptionalMark /><textarea className={fieldClass} name="catatan" rows={2} /></label>
-            <label className="space-y-1 text-sm md:col-span-2">Dokumen klaim (PDF/JPG/PNG, maks. 5 MB)<RequiredMark /><input className={fieldClass} type="file" name="dokumen" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" required /></label>
-            <FormError error={error} />
-            {vendors.error && <FormError error={`Data vendor gagal dimuat: ${vendors.error}`} />}
-            <Button type="submit" disabled={saving || vendors.loading}>{saving ? "Mengunggah..." : "Upload Klaim"}</Button>
-          </form>
-        </CardContent></Card>
-      )}
-      <Card><CardContent className="p-0">
-        <LoadingError loading={claims.loading} error={claims.error} empty={!claims.data.length} />
-        {!claims.loading && !claims.error && claims.data.length > 0 && (
-          <DataTable headers={["Tanggal", "Bulan", "Jenis", "Jumlah Mitra", "Nominal", "Vendor", "Dokumen", "Status"]}>
-            {claims.data.map((item) => <TableRow key={item.id}><TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString("id-ID") : "-"}</TableCell><TableCell>{item.bulan}</TableCell><TableCell>{item.jenisClaim}</TableCell><TableCell>{item.jumlahMitra}</TableCell><TableCell>{item.nominal.toLocaleString("id-ID")}</TableCell><TableCell>{item.vendor?.name || "-"}</TableCell><TableCell>{item.hasDokumen ? <a className="text-primary underline" href={`/api/claim/${item.id}`} target="_blank" rel="noreferrer">{item.dokumenNama || "Unduh"}</a> : "-"}</TableCell><TableCell><StatusBadge status={item.status} /></TableCell></TableRow>)}
+            </div>
+
+            {/* Filter Jenis Klaim */}
+            {jenisOptions.length > 0 && (
+              <div className="min-w-36">
+                <select
+                  value={filterJenis}
+                  onChange={(e) => setFilterJenis(e.target.value)}
+                  className={cn(fieldClass, "text-xs h-9")}
+                >
+                  <option value="ALL">Semua Jenis</option>
+                  {jenisOptions.map((jenis) => (
+                    <option key={jenis} value={jenis}>
+                      {jenis}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Filter Bulan Klaim */}
+            <div className="min-w-36">
+              <input
+                type="month"
+                value={filterBulan}
+                onChange={(e) => setFilterBulan(e.target.value)}
+                className={cn(fieldClass, "text-xs h-9")}
+                title="Filter bulan klaim"
+              />
+            </div>
+
+            {/* Filter Rentang Tanggal Input */}
+            <div className="flex items-center gap-1.5">
+              <input
+                type="date"
+                value={filterStartDate}
+                onChange={(e) => setFilterStartDate(e.target.value)}
+                className={cn(fieldClass, "text-xs h-9 w-36")}
+                title="Tanggal input mulai"
+              />
+              <span className="text-xs text-muted-foreground">-</span>
+              <input
+                type="date"
+                value={filterEndDate}
+                onChange={(e) => setFilterEndDate(e.target.value)}
+                className={cn(fieldClass, "text-xs h-9 w-36")}
+                title="Tanggal input selesai"
+              />
+            </div>
+
+            {/* Tombol Reset Filter */}
+            {hasActiveFilter && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={resetFilters}
+                className="text-xs h-9 text-muted-foreground hover:text-foreground flex items-center gap-1.5"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Reset
+              </Button>
+            )}
+          </div>
+
+          {/* Tombol Upload Klaim di sebelah kanan */}
+          {session?.user.role === "VM" && (
+            <Button
+              onClick={() => { setError(null); setUploadModalOpen(true); }}
+              className="flex items-center gap-2 text-xs h-9 px-4 shrink-0 shadow-xs"
+            >
+              <Upload className="h-4 w-4" />
+              Upload Klaim
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* Tabel Daftar Klaim */}
+      <Card><CardContent className="overflow-x-auto p-0">
+        <LoadingError loading={claims.loading} error={claims.error} empty={!filteredClaims.length} />
+        {!claims.loading && !claims.error && filteredClaims.length > 0 && (
+          <DataTable headers={[
+            "Tanggal",
+            "Bulan Klaim",
+            ...(session?.user.role !== "VENDOR" ? ["Vendor"] : []),
+            "Jenis Klaim",
+            "Jumlah Mitra",
+            "Nominal Klaim",
+            "Catatan",
+            "Dokumen Klaim",
+            "Status",
+          ]}>
+            {filteredClaims.map((item) => (
+              <TableRow key={item.id}>
+                <TableCell>
+                  <span className="text-xs text-muted-foreground">
+                    {item.createdAt ? formatDate(item.createdAt) : "-"}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <span className="text-xs font-medium text-foreground">
+                    {formatPeriodMonth(item.bulan)}
+                  </span>
+                </TableCell>
+                {session?.user.role !== "VENDOR" && (
+                  <TableCell>
+                    <span className="text-xs font-medium text-foreground">
+                      {item.vendor?.name || "-"}
+                    </span>
+                  </TableCell>
+                )}
+                <TableCell>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-semibold bg-muted text-foreground border">
+                    {item.jenisClaim}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <span className="text-xs font-medium text-foreground">
+                    {item.jumlahMitra} mitra
+                  </span>
+                </TableCell>
+                <TableCell>
+                  <span className="text-xs font-bold text-foreground">
+                    {formatCurrency(item.nominal)}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  {item.catatan ? (
+                    <span className="text-xs text-muted-foreground block max-w-[180px] truncate" title={item.catatan}>
+                      {item.catatan}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">-</span>
+                  )}
+                </TableCell>
+                <TableCell>
+                  {item.hasDokumen ? (
+                    <a
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs bg-muted hover:bg-muted/80 text-foreground border transition-colors font-medium"
+                      href={`/api/claim/${item.id}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <FileText className="h-3.5 w-3.5 text-primary" />
+                      <span className="truncate max-w-[140px]">{item.dokumenNama || "Lihat File"}</span>
+                      <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                    </a>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">-</span>
+                  )}
+                </TableCell>
+                <TableCell><StatusBadge status={item.status} /></TableCell>
+              </TableRow>
+            ))}
           </DataTable>
         )}
       </CardContent></Card>
+
+      {/* Modal Upload Data Klaim (VM) */}
+      {uploadModalOpen && session?.user.role === "VM" && (
+        <Dialog open onOpenChange={(open) => { if (!open && !saving) { setError(null); setUploadModalOpen(false); } }} className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+              <Upload className="h-5 w-5 text-primary" />
+              Upload Klaim Baru
+            </DialogTitle>
+          </DialogHeader>
+          <DialogContent>
+            <form onSubmit={submit} className="space-y-4">
+              <div className="p-3 bg-blue-50/70 dark:bg-blue-950/20 rounded-lg border border-blue-200/70 text-xs text-blue-900 dark:text-blue-200 space-y-1">
+                <p className="font-semibold">Alur Pemotongan Klaim:</p>
+                <p className="leading-relaxed text-[11px]">
+                  Klaim yang diunggah untuk vendor dan bulan tertentu akan tercatat pada <em>Daftar Klaim</em> dan otomatis menjadi potongan tagihan pada pengajuan <em>Invoice</em> di bulan tagihan yang sama.
+                </p>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="space-y-1 text-sm">
+                  Vendor<RequiredMark />
+                  <select className={fieldClass} name="vendorId" required defaultValue="">
+                    <option value="" disabled>Pilih vendor</option>
+                    {vendors.data.filter((vendor) => vendor.status === "ACTIVE").map((vendor) => (
+                      <option key={vendor.id} value={vendor.id}>{vendor.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="space-y-1 text-sm">
+                  Bulan Klaim<RequiredMark />
+                  <input className={fieldClass} type="month" name="bulan" required />
+                </label>
+                <label className="space-y-1 text-sm">
+                  Jenis Klaim<RequiredMark />
+                  <input className={fieldClass} name="jenisClaim" placeholder="Contoh: GAJI, BPJS, LEMBUR" required />
+                </label>
+                <label className="space-y-1 text-sm">
+                  Jumlah Mitra<RequiredMark />
+                  <input className={fieldClass} type="number" min="1" name="jumlahMitra" placeholder="Contoh: 5" required />
+                </label>
+                <label className="space-y-1 text-sm">
+                  Nominal Total (Rp)<RequiredMark />
+                  <input className={fieldClass} type="number" min="0" step="any" name="nominal" placeholder="Contoh: 500000" required />
+                </label>
+                <label className="space-y-1 text-sm">
+                  Catatan<OptionalMark />
+                  <input className={fieldClass} name="catatan" placeholder="Keterangan klaim jika ada" />
+                </label>
+              </div>
+
+              <div className="pt-2 border-t">
+                <DocumentFileInput
+                  name="dokumen"
+                  label="Dokumen Klaim (PDF/JPG/PNG, maks. 5 MB)"
+                  accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
+                  required
+                  helpText="Unggah bukti atau rincian klaim operasional."
+                />
+              </div>
+
+              <FormError error={error} />
+              {vendors.error && <FormError error={`Data vendor gagal dimuat: ${vendors.error}`} />}
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={saving}
+                  onClick={() => { setError(null); setUploadModalOpen(false); }}
+                >
+                  Batal
+                </Button>
+                <Button type="submit" disabled={saving || vendors.loading} className="gap-2">
+                  <Upload className="h-4 w-4" />
+                  {saving ? "Mengunggah..." : "Upload Klaim"}
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
+      )}
     </FeaturePage>
   );
-}
-
-function formatInvoiceMonth(bulan: string): string {
-  if (!bulan) return "-";
-  const parts = bulan.split("-");
-  if (parts.length < 2) return bulan;
-  const year = parseInt(parts[0], 10);
-  const month = parseInt(parts[1], 10);
-  if (isNaN(year) || isNaN(month)) return bulan;
-  const date = new Date(year, month - 1, 1);
-  return date.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
 }
 
 export function InvoicesPage() {
@@ -2883,18 +3250,6 @@ export function InvoicesPage() {
   const [filterStartDate, setFilterStartDate] = useState("");
   const [filterEndDate, setFilterEndDate] = useState("");
 
-  async function readInvoiceDocument(file: File) {
-    return new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        if (typeof reader.result === "string") resolve(reader.result);
-        else reject(new Error("File invoice gagal dibaca."));
-      };
-      reader.onerror = () => reject(new Error("File invoice gagal dibaca."));
-      reader.readAsDataURL(file);
-    });
-  }
-
   async function uploadPaymentProof(invoiceId: string, file: File) {
     setError(null);
     setUploadingInvoiceId(invoiceId);
@@ -2906,7 +3261,7 @@ export function InvoicesPage() {
         throw new Error("Ukuran bukti transfer maksimal 5 MB.");
       }
       await sendJson(`/api/invoice/${invoiceId}`, "PATCH", {
-        buktiTransfer: await readInvoiceDocument(file),
+        buktiTransfer: await readUploadDataUrl(file, "File invoice"),
         buktiTransferNama: file.name,
       });
       invoices.reload();
@@ -2940,7 +3295,7 @@ export function InvoicesPage() {
         totalAmount: Number(form.get("totalAmount")),
         tanggalJatuhTempo: form.get("tanggalJatuhTempo") || undefined,
         catatan: form.get("catatan"),
-        dokumen: await readInvoiceDocument(file),
+        dokumen: await readUploadDataUrl(file, "File invoice"),
         dokumenNama: file.name,
       });
       setUploadModalOpen(false);
@@ -2966,11 +3321,11 @@ export function InvoicesPage() {
       return false;
     }
     if (filterStartDate) {
-      const itemDate = item.createdAt ? new Date(item.createdAt).toISOString().split("T")[0] : "";
+      const itemDate = toLocalYmd(item.createdAt);
       if (itemDate && itemDate < filterStartDate) return false;
     }
     if (filterEndDate) {
-      const itemDate = item.createdAt ? new Date(item.createdAt).toISOString().split("T")[0] : "";
+      const itemDate = toLocalYmd(item.createdAt);
       if (itemDate && itemDate > filterEndDate) return false;
     }
     return true;
@@ -3148,7 +3503,7 @@ export function InvoicesPage() {
                 </TableCell>
                 <TableCell>
                   <span className="text-xs font-medium text-foreground">
-                    {formatInvoiceMonth(item.bulan)}
+                    {formatPeriodMonth(item.bulan)}
                   </span>
                 </TableCell>
                 {session?.user.role !== "VENDOR" && (
@@ -3334,7 +3689,7 @@ export function InvoicesPage() {
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Bulan Periode:</span>
-                  <strong>{formatInvoiceMonth(proofTargetInvoice.bulan)}</strong>
+                  <strong>{formatPeriodMonth(proofTargetInvoice.bulan)}</strong>
                 </div>
 
                 <div className="pt-2 border-t space-y-1">

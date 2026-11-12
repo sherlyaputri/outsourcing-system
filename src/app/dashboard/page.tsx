@@ -23,7 +23,7 @@ export default function DashboardPage() {
     if (status === "unauthenticated") {
       router.replace("/login");
     } else if (dashboardPath) {
-      router.replace(dashboardPath);
+      router.replace(dashboardPath)
     }
   }, [dashboardPath, router, status]);
 
