@@ -8,8 +8,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { StatusBadge } from "@/components/ui/status-badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { FileText, User, Mail, Phone, MapPin, Briefcase, CreditCard, Shield, ExternalLink, Calendar, Edit, Eye, Check, Upload, Search, RotateCcw } from "lucide-react";
-import { cn, formatCurrency, formatDate } from "@/lib/utils";
+import { DEFAULT_PAGE_SIZE, TablePagination } from "@/components/ui/table-pagination";
+import { FileText, User, Mail, Phone, MapPin, Briefcase, CreditCard, Shield, ExternalLink, Calendar, Edit, Eye, Check, Upload, Search, RotateCcw, Copy, KeyRound } from "lucide-react";
+import { cn, formatCurrency, formatDate, getStatusLabel } from "@/lib/utils";
 
 interface ApiState<T> {
   data: T;
@@ -152,6 +153,15 @@ interface AccountRequest {
     kecamatan?: string | null;
     kabKota?: string | null;
     provinsi?: string | null;
+    domisiliSesuaiKtp?: boolean | null;
+    domisiliAlamat?: string | null;
+    domisiliKelurahan?: string | null;
+    domisiliKecamatan?: string | null;
+    domisiliKabKota?: string | null;
+    domisiliProvinsi?: string | null;
+    discType?: string | null;
+    discReport?: string | null;
+    alasanKeputusan?: string | null;
     osRequest: { id: string; type: string; jumlah: number; posisi?: string | null; penempatan?: string | null; waktuKerja?: string | null };
   } | null;
 }
@@ -251,6 +261,15 @@ interface Invoice {
   vendor?: { id?: string; name: string };
 }
 
+interface OSRequestApproval {
+  id: string;
+  level: string;
+  status: string;
+  catatan?: string | null;
+  updatedAt?: string;
+  approver?: { name: string; role: string };
+}
+
 interface OSRequest {
   id: string;
   type: string;
@@ -263,11 +282,13 @@ interface OSRequest {
   penempatan?: string | null;
   waktuKerja?: string | null;
   alasan?: string | null;
+  catatan?: string | null;
   vendorId?: string | null;
   vendorNotifiedAt?: string | null;
   createdAt?: string;
   requester?: { name: string; role: string };
   vendor?: { name: string } | null;
+  approvals?: OSRequestApproval[];
   candidates?: OSCandidate[];
 }
 
@@ -373,12 +394,20 @@ function FeaturePage({
 function DataTable({
   headers,
   children,
+  pageSize,
 }: {
   headers: string[];
   children: ReactNode;
+  pageSize?: number;
 }) {
   const [sort, setSort] = useState<{ column: number; direction: "asc" | "desc" } | null>(null);
+  const [page, setPage] = useState(1);
   const rows = Children.toArray(children);
+
+  useEffect(() => {
+    setPage(1);
+  }, [rows.length, sort]);
+
   const sortedRows = sort
     ? [...rows].sort((left, right) => {
         const getCellText = (row: ReactNode, column: number) => {
@@ -398,35 +427,52 @@ function DataTable({
       })
     : rows;
 
+  const hasPagination = Boolean(pageSize && pageSize > 0);
+  const totalPages = hasPagination ? Math.max(1, Math.ceil(sortedRows.length / pageSize!)) : 1;
+  const safePage = Math.min(page, totalPages);
+  const displayedRows = hasPagination
+    ? sortedRows.slice((safePage - 1) * pageSize!, safePage * pageSize!)
+    : sortedRows;
+
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          {headers.map((header, column) => (
-            <TableHead key={header} aria-sort={
-              sort?.column === column
-                ? sort.direction === "asc" ? "ascending" : "descending"
-                : "none"
-            }>
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 text-left"
-                onClick={() => setSort((current) => ({
-                  column,
-                  direction: current?.column === column && current.direction === "asc" ? "desc" : "asc",
-                }))}
-              >
-                {header}
-                <span className="text-xs text-muted-foreground">
-                  {sort?.column === column ? (sort.direction === "asc" ? "A-Z" : "Z-A") : "↕"}
-                </span>
-              </button>
-            </TableHead>
-          ))}
-        </TableRow>
-      </TableHeader>
-      <TableBody>{sortedRows}</TableBody>
-    </Table>
+    <div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            {headers.map((header, column) => (
+              <TableHead key={header} aria-sort={
+                sort?.column === column
+                  ? sort.direction === "asc" ? "ascending" : "descending"
+                  : "none"
+              }>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 text-left"
+                  onClick={() => setSort((current) => ({
+                    column,
+                    direction: current?.column === column && current.direction === "asc" ? "desc" : "asc",
+                  }))}
+                >
+                  {header}
+                  <span className="text-xs text-muted-foreground">
+                    {sort?.column === column ? (sort.direction === "asc" ? "A-Z" : "Z-A") : "↕"}
+                  </span>
+                </button>
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>{displayedRows}</TableBody>
+      </Table>
+      {hasPagination && (
+        <TablePagination
+          totalItems={sortedRows.length}
+          currentPage={safePage}
+          pageSize={pageSize}
+          onPageChange={setPage}
+        />
+      )}
+    </div>
   );
 }
 
@@ -476,17 +522,21 @@ export function MitraManagementPage() {
   const mitras = useApiData<Mitra[]>("/api/mitra", []);
   const [editingMitra, setEditingMitra] = useState<Mitra | null>(null);
   const [detailMitra, setDetailMitra] = useState<Mitra | null>(null);
+  const [credentialMitra, setCredentialMitra] = useState<Mitra | null>(null);
   return (
     <FeaturePage title="Data Mitra OS" description="Daftar mitra OS dan ID yang digunakan untuk request pergantian atau pengurangan." roles={["VENDOR", "VM", "SM"]}>
       <Card><CardContent className="p-0">
         <LoadingError loading={mitras.loading} error={mitras.error} empty={!mitras.data.length} />
         {!mitras.loading && !mitras.error && mitras.data.length > 0 && (
-          <DataTable headers={[
-            "ID Mitra OS", "Nama", "Email", "Vendor", "Posisi", "Penempatan", "Shift",
-            ...(session?.user.role === "VENDOR" || session?.user.role === "VM" ? ["Kredensial Awal"] : []),
-            ...(session?.user.role === "VENDOR" || session?.user.role === "VM" ? ["Dokumen Tambahan"] : []),
-            "Detail Data", "Status",
-          ]}>
+          <DataTable
+            pageSize={DEFAULT_PAGE_SIZE}
+            headers={[
+              "ID Mitra OS", "Nama", "Email", "Vendor", "Posisi", "Penempatan", "Shift",
+              ...(session?.user.role === "VENDOR" || session?.user.role === "VM" ? ["Kredensial Awal"] : []),
+              ...(session?.user.role === "VENDOR" || session?.user.role === "VM" ? ["Dokumen Tambahan"] : []),
+              "Detail Data", "Status",
+            ]}
+          >
             {mitras.data.map((mitra) => (
               <TableRow key={mitra.id}>
                 <TableCell>
@@ -500,14 +550,18 @@ export function MitraManagementPage() {
                 {(session?.user.role === "VENDOR" || session?.user.role === "VM") && (
                   <TableCell>
                     {mitra.initialPassword ? (
-                      <details>
-                        <summary className="cursor-pointer text-primary">Lihat kredensial</summary>
-                        <div className="mt-1 space-y-1 text-xs">
-                          <p>Username: {mitra.email}</p>
-                          <p>Password awal: <code>{mitra.initialPassword}</code></p>
-                        </div>
-                      </details>
-                    ) : "Tidak tersedia"}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-primary hover:text-primary hover:bg-primary/10 flex items-center gap-1.5 text-xs h-7 px-2.5 font-medium"
+                        onClick={() => setCredentialMitra(mitra)}
+                      >
+                        <KeyRound className="h-3.5 w-3.5" />
+                        Lihat
+                      </Button>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">Tidak tersedia</span>
+                    )}
                   </TableCell>
                 )}
                 {(session?.user.role === "VENDOR" || session?.user.role === "VM") && (
@@ -577,7 +631,112 @@ export function MitraManagementPage() {
           canEdit={session?.user.role === "VENDOR"}
         />
       )}
+      {credentialMitra && credentialMitra.initialPassword && (
+        <MitraCredentialDialog
+          mitra={credentialMitra}
+          onClose={() => setCredentialMitra(null)}
+        />
+      )}
     </FeaturePage>
+  );
+}
+
+function MitraCredentialDialog({
+  mitra,
+  onClose,
+}: {
+  mitra: Mitra;
+  onClose: () => void;
+}) {
+  const [copiedField, setCopiedField] = useState<"email" | "password" | "both" | null>(null);
+
+  async function copyText(field: "email" | "password" | "both", text: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedField(field);
+      window.setTimeout(() => {
+        setCopiedField((current) => (current === field ? null : current));
+      }, 2000);
+    } catch {
+      // Fallback ignored if clipboard permission unavailable
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose(); }} className="max-w-lg">
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+          <KeyRound className="h-5 w-5 text-primary" />
+          Kredensial Awal Mitra OS
+        </DialogTitle>
+      </DialogHeader>
+      <DialogContent className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-muted/30 p-4">
+          <div>
+            <p className="font-semibold text-foreground">{mitra.name}</p>
+            <p className="text-xs text-muted-foreground">
+              {mitra.mitraProfile?.idMitraOs ? `ID: ${mitra.mitraProfile.idMitraOs}` : "ID Belum diatur"}
+              {mitra.vendor?.name ? ` · ${mitra.vendor.name}` : ""}
+            </p>
+          </div>
+          <StatusBadge status={mitra.status} />
+        </div>
+
+        <div className="space-y-3 rounded-xl border bg-card p-4 shadow-xs">
+          <div className="space-y-1">
+            <span className="text-[11px] font-medium text-muted-foreground block">Username / Email</span>
+            <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/20 px-3 py-2">
+              <code className="text-sm font-medium text-foreground break-all">{mitra.email}</code>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 shrink-0 gap-1 px-2 text-xs"
+                onClick={() => copyText("email", mitra.email)}
+              >
+                {copiedField === "email" ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                {copiedField === "email" ? "Tersalin" : "Salin"}
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <span className="text-[11px] font-medium text-muted-foreground block">Password Awal</span>
+            <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/20 px-3 py-2">
+              <code className="text-sm font-semibold tracking-wide text-foreground break-all">{mitra.initialPassword}</code>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 shrink-0 gap-1 px-2 text-xs"
+                onClick={() => copyText("password", mitra.initialPassword || "")}
+              >
+                {copiedField === "password" ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                {copiedField === "password" ? "Tersalin" : "Salin"}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          Sampaikan kredensial awal ini kepada Mitra OS untuk login pertama kali, dan sarankan segera mengubah password setelah berhasil masuk.
+        </p>
+      </DialogContent>
+      <DialogFooter>
+        <Button
+          type="button"
+          variant="outline"
+          className="gap-1.5"
+          onClick={() => copyText("both", `Username: ${mitra.email}\nPassword awal: ${mitra.initialPassword || ""}`)}
+        >
+          {copiedField === "both" ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+          {copiedField === "both" ? "Semua Tersalin" : "Salin Semua"}
+        </Button>
+        <Button type="button" onClick={onClose}>
+          Tutup
+        </Button>
+      </DialogFooter>
+    </Dialog>
   );
 }
 
@@ -2423,6 +2582,29 @@ function VendorCandidateForm({
       setError("Data karyawan yang sama tidak dapat dipilih untuk lebih dari satu kandidat.");
       return;
     }
+    const candidateIdentities = candidates.map((candidate) => {
+      if (candidate.source === "EMPLOYEE") {
+        const employee = employees.data.find((item) => item.id === candidate.employeeId);
+        return {
+          nik: (employee?.nik || "").trim(),
+          email: (employee?.email || "").trim().toLowerCase(),
+        };
+      }
+      return {
+        nik: candidate.nik.trim(),
+        email: candidate.email.trim().toLowerCase(),
+      };
+    });
+    const niks = candidateIdentities.map((item) => item.nik).filter(Boolean);
+    if (new Set(niks).size !== niks.length) {
+      setError("NIK setiap kandidat harus berbeda dalam satu pengajuan.");
+      return;
+    }
+    const emails = candidateIdentities.map((item) => item.email).filter(Boolean);
+    if (new Set(emails).size !== emails.length) {
+      setError("Email setiap kandidat harus berbeda dalam satu pengajuan.");
+      return;
+    }
     if (!window.confirm(`Anda akan submit ${candidates.length} kandidat. Lanjutkan?`)) return;
     setSaving(true);
     try {
@@ -2550,32 +2732,49 @@ function VendorCandidateForm({
                     Isi data baru
                   </label>
                 </div>
-                {candidate.source === "EMPLOYEE" ? (
+                {candidate.source === "EMPLOYEE" ? (() => {
+                  const availableEmployees = employees.data.filter((employee) => (
+                    !candidates.some((item, itemIndex) => (
+                      itemIndex !== index
+                      && item.source === "EMPLOYEE"
+                      && item.employeeId === employee.id
+                    ))
+                  ));
+                  return (
                   <div className="space-y-3">
                     <label className="block space-y-1 text-sm">
                       Pilih karyawan<RequiredMark />
                       <select
                         className={fieldClass}
                         value={candidate.employeeId}
-                        disabled={employees.loading || employees.data.length === 0}
-                        onChange={(event) => setCandidates((current) => current.map((item, itemIndex) => (
-                          itemIndex === index ? { ...item, employeeId: event.target.value } : item
-                        )))}
+                        disabled={employees.loading || availableEmployees.length === 0}
+                        onChange={(event) => {
+                          const nextEmployeeId = event.target.value;
+                          setCandidates((current) => {
+                            const alreadyUsed = current.some((item, itemIndex) => (
+                              itemIndex !== index
+                              && item.source === "EMPLOYEE"
+                              && item.employeeId === nextEmployeeId
+                            ));
+                            if (nextEmployeeId && alreadyUsed) return current;
+                            return current.map((item, itemIndex) => (
+                              itemIndex === index ? { ...item, employeeId: nextEmployeeId } : item
+                            ));
+                          });
+                        }}
                         required
                       >
                         <option value="">
-                          {employees.loading ? "Memuat data karyawan..." : "Pilih karyawan"}
+                          {employees.loading
+                            ? "Memuat data karyawan..."
+                            : employees.data.length === 0
+                              ? "Belum ada data karyawan tersedia"
+                              : availableEmployees.length === 0
+                                ? "Semua karyawan sudah dipilih di kandidat lain"
+                                : "Pilih karyawan"}
                         </option>
-                        {employees.data.map((employee) => (
-                          <option
-                            key={employee.id}
-                            value={employee.id}
-                            disabled={candidates.some((item, itemIndex) => (
-                              itemIndex !== index
-                              && item.source === "EMPLOYEE"
-                              && item.employeeId === employee.id
-                            ))}
-                          >
+                        {availableEmployees.map((employee) => (
+                          <option key={employee.id} value={employee.id}>
                             {employee.name} — {employee.nik}
                           </option>
                         ))}
@@ -2585,6 +2784,11 @@ function VendorCandidateForm({
                     {!employees.loading && employees.data.length === 0 && !employees.error && (
                       <p className="text-sm text-muted-foreground">
                         Belum ada data karyawan yang tersedia. Tambahkan melalui menu Data Karyawan.
+                      </p>
+                    )}
+                    {!employees.loading && employees.data.length > 0 && availableEmployees.length === 0 && !candidate.employeeId && !employees.error && (
+                      <p className="text-sm text-amber-700">
+                        Semua data karyawan yang tersedia sudah dipilih pada kandidat lain. Gunakan &ldquo;Isi data baru&rdquo; atau tambahkan karyawan baru di menu Data Karyawan.
                       </p>
                     )}
                     {candidate.employeeId && (() => {
@@ -2608,7 +2812,8 @@ function VendorCandidateForm({
                       </label>
                     </div>
                   </div>
-                ) : (
+                  );
+                })() : (
                   <CandidateFields candidate={candidate} index={index} update={updateCandidate} includeDisc />
                 )}
               </fieldset>
@@ -2658,6 +2863,7 @@ export function AccountApprovalPage() {
   const vendors = useApiData<Vendor[]>("/api/vendor", []);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [detailRequest, setDetailRequest] = useState<AccountRequest | null>(null);
   const [activatedVendorCredentials, setActivatedVendorCredentials] = useState<{ name: string; email: string; password: string } | null>(null);
   const pendingAccounts = requests.data.filter((item) => item.status === "PENDING");
   const pendingVendors = vendors.data.filter((vendor) => vendor.status === "PENDING");
@@ -2670,6 +2876,9 @@ export function AccountApprovalPage() {
       const request = requests.data.find((item) => item.id === requestId);
       if (status === "APPROVED" && request?.type === "VENDOR" && result.initialPassword) {
         setActivatedVendorCredentials({ name: request.vendorName || request.name, email: request.email, password: result.initialPassword });
+      }
+      if (detailRequest?.id === requestId) {
+        setDetailRequest(null);
       }
       requests.reload();
     } catch (actionError) {
@@ -2717,42 +2926,54 @@ export function AccountApprovalPage() {
       )}
       {pendingAccounts.length > 0 && <Card><CardContent className="overflow-x-auto p-0">
         <h2 className="px-4 py-3 text-lg font-semibold">Akun Mitra OS Menunggu Persetujuan</h2>
-          <DataTable headers={["Tanggal", "Nama", "Email", "Telepon", "Vendor/Pemohon", "Request OS", "Status", "Aksi"]}>
+          <DataTable headers={["Tanggal", "Nama", "Email", "Telepon", "Vendor/Pemohon", "Request OS", "Detail Data", "Status", "Aksi"]}>
             {pendingAccounts.map((item) => (
               <TableRow key={item.id}>
                 <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString("id-ID") : "-"}</TableCell>
                 <TableCell>
-                  {item.name}
-                  <p className="mt-1 text-xs text-muted-foreground">Jenis akun: {item.type === "VENDOR" ? "Vendor OS" : "Mitra OS"}</p>
-                  {item.candidate && (
-                    <details className="mt-2 text-xs">
-                      <summary className="cursor-pointer text-primary">Lihat data kandidat</summary>
-                      <div className="mt-2 space-y-2">
-                        <p>NIK: {item.candidate.nik || "-"}</p>
-                        <p>SIM: {item.candidate.jenisSim || "-"} · {item.candidate.noSim || "-"}</p>
-                        <p>Alamat: {item.candidate.alamat || "-"}, {item.candidate.kelurahan || "-"}, {item.candidate.kecamatan || "-"}, {item.candidate.kabKota || "-"}, {item.candidate.provinsi || "-"}</p>
-                        <p>Posisi: {item.candidate.osRequest.posisi || "-"} · Wilayah: {item.candidate.osRequest.penempatan || "-"} · Waktu: {item.candidate.osRequest.waktuKerja || "-"}</p>
-                        <div className="flex gap-3">
-                          {item.candidate.fotoKtp && <img className="h-24 rounded border object-contain" src={item.candidate.fotoKtp} alt="Foto KTP kandidat" />}
-                          {item.candidate.fotoSim && <img className="h-24 rounded border object-contain" src={item.candidate.fotoSim} alt="Foto SIM kandidat" />}
-                          {item.candidate.skck && <a href={item.candidate.skck} target="_blank" rel="noreferrer">{item.candidate.skck.startsWith("data:image/") ? <img className="h-24 rounded border object-contain" src={item.candidate.skck} alt="SKCK kandidat" /> : <span className="text-primary underline">Lihat SKCK (PDF)</span>}</a>}
-                          {item.candidate.hasSkbn && <a href={`/api/candidate/${item.candidate.id}/skbn`} target="_blank" rel="noreferrer">{item.candidate.skbnIsImage ? <img className="h-24 rounded border object-contain" src={`/api/candidate/${item.candidate.id}/skbn`} alt="SKBN kandidat" /> : <span className="text-primary underline">Lihat SKBN (PDF)</span>}</a>}
-                        </div>
-                      </div>
-                    </details>
-                  )}
-                </TableCell><TableCell>{item.email}</TableCell>
-                <TableCell>{item.phone || "-"}</TableCell><TableCell>{item.vendorName || item.requester?.name || "-"}</TableCell>
-                <TableCell>{item.candidate ? `${item.candidate.osRequest.type} · ${item.candidate.osRequest.jumlah} orang` : "-"}</TableCell>
+                  <p className="font-medium">{item.name}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Jenis akun: {item.type === "VENDOR" ? "Vendor OS" : "Mitra OS"}</p>
+                </TableCell>
+                <TableCell>{item.email}</TableCell>
+                <TableCell>{item.phone || "-"}</TableCell>
+                <TableCell>{item.vendorName || item.requester?.name || "-"}</TableCell>
+                <TableCell>{item.candidate ? `${getStatusLabel(item.candidate.osRequest.type)} · ${item.candidate.osRequest.jumlah} orang` : "-"}</TableCell>
+                <TableCell>
+                  {item.candidate ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1.5"
+                      onClick={() => setDetailRequest(item)}
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      Lihat
+                    </Button>
+                  ) : "-"}
+                </TableCell>
                 <TableCell><StatusBadge status={item.status} /></TableCell>
-                <TableCell className="space-x-2">
-                  <Button disabled={busyId === item.id} onClick={() => decide(item.id, "APPROVED")}>{item.type === "VENDOR" ? "Aktifkan Akun Vendor" : "Aktivasi Akun"}</Button>
-                  <Button variant="outline" disabled={busyId === item.id} onClick={() => decide(item.id, "REJECTED")}>Tolak</Button>
+                <TableCell>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" disabled={busyId === item.id} onClick={() => decide(item.id, "APPROVED")}>
+                      {item.type === "VENDOR" ? "Aktifkan Akun Vendor" : "Aktivasi Akun"}
+                    </Button>
+                    <Button size="sm" variant="outline" disabled={busyId === item.id} onClick={() => decide(item.id, "REJECTED")}>
+                      Tolak
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
           </DataTable>
       </CardContent></Card>}
+      {detailRequest && detailRequest.candidate && (
+        <CandidateAccountDetailDialog
+          request={detailRequest}
+          busy={busyId === detailRequest.id}
+          onClose={() => setDetailRequest(null)}
+          onDecide={(status) => decide(detailRequest.id, status)}
+        />
+      )}
       <Dialog open={Boolean(activatedVendorCredentials)} onOpenChange={(open) => { if (!open) setActivatedVendorCredentials(null); }}>
         <DialogHeader><DialogTitle>Akun Vendor OS aktif</DialogTitle></DialogHeader>
         <DialogContent>
@@ -2765,6 +2986,256 @@ export function AccountApprovalPage() {
         </DialogContent>
       </Dialog>
     </FeaturePage>
+  );
+}
+
+function DocumentPreviewTile({
+  label,
+  href,
+  isImage,
+}: {
+  label: string;
+  href: string;
+  isImage: boolean;
+}) {
+  return (
+    <div className="space-y-1">
+      <span className="text-[11px] font-medium text-muted-foreground block">{label}</span>
+      <a href={href} target="_blank" rel="noreferrer" className="block group overflow-hidden rounded-lg border bg-muted/20">
+        {isImage ? (
+          <img
+            src={href}
+            alt={label}
+            className="h-24 w-full object-contain group-hover:scale-105 transition-transform"
+          />
+        ) : (
+          <div className="flex h-24 w-full flex-col items-center justify-center p-2 text-center hover:bg-muted/50 transition">
+            <FileText className="h-7 w-7 text-primary" />
+            <span className="mt-1 text-[11px] font-medium text-primary underline">Lihat {label} (PDF)</span>
+          </div>
+        )}
+      </a>
+    </div>
+  );
+}
+
+function CandidateAccountDetailDialog({
+  request,
+  busy,
+  onClose,
+  onDecide,
+}: {
+  request: AccountRequest;
+  busy: boolean;
+  onClose: () => void;
+  onDecide: (status: "APPROVED" | "REJECTED") => void;
+}) {
+  const candidate = request.candidate;
+  if (!candidate) return null;
+
+  const initials = (request.name || "K")
+    .split(" ")
+    .filter(Boolean)
+    .map((n) => n[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
+  const ktpAddress = [
+    candidate.provinsi,
+    candidate.kabKota,
+    candidate.kecamatan,
+    candidate.kelurahan,
+    candidate.alamat,
+  ].filter(Boolean).join(", ");
+
+  const domisiliAddress = candidate.domisiliSesuaiKtp === false
+    ? [
+        candidate.domisiliProvinsi,
+        candidate.domisiliKabKota,
+        candidate.domisiliKecamatan,
+        candidate.domisiliKelurahan,
+        candidate.domisiliAlamat,
+      ].filter(Boolean).join(", ") || "-"
+    : "Sesuai dengan alamat KTP";
+
+  const hasDocuments = Boolean(
+    candidate.fotoKtp || candidate.fotoSim || candidate.skck || candidate.hasSkbn || candidate.discReport,
+  );
+
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl font-bold">
+          <User className="h-5 w-5 text-primary" />
+          Detail Data Kandidat Mitra OS
+        </DialogTitle>
+      </DialogHeader>
+      <DialogContent className="p-0 max-h-[80vh] overflow-y-auto">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-6 p-6">
+          <div className="md:col-span-4 flex flex-col items-center text-center p-5 bg-muted/30 rounded-xl border space-y-3.5 h-fit">
+            <div className="mt-1">
+              <div className="w-32 h-32 sm:w-36 sm:h-36 rounded-2xl bg-primary/10 border-2 border-dashed border-primary/30 flex flex-col items-center justify-center text-primary shadow-xs">
+                <span className="text-3xl font-bold tracking-wider">{initials}</span>
+                <span className="text-[11px] text-muted-foreground mt-1">Kandidat Mitra OS</span>
+              </div>
+            </div>
+
+            <div>
+              <StatusBadge status={request.status} className="px-3 py-1 text-xs font-semibold shadow-xs" />
+            </div>
+
+            <div className="w-full space-y-1.5">
+              <h3 className="font-bold text-lg text-foreground leading-tight">{request.name}</h3>
+              <p className="text-xs font-medium text-primary bg-primary/10 py-0.5 px-2.5 rounded-full inline-block">
+                {getStatusLabel(candidate.osRequest.type)} · {candidate.osRequest.jumlah} orang
+              </p>
+            </div>
+
+            <div className="w-full text-left text-xs space-y-2.5 pt-3 border-t">
+              <div className="flex items-start gap-2 text-muted-foreground">
+                <Briefcase className="h-4 w-4 shrink-0 text-primary mt-0.5" />
+                <div>
+                  <p className="font-medium text-foreground">{candidate.osRequest.posisi || "-"}</p>
+                  <p className="text-[11px] text-muted-foreground">{request.vendorName || request.requester?.name || "-"}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <MapPin className="h-4 w-4 shrink-0 text-primary" />
+                <span className="text-foreground">{candidate.osRequest.penempatan || "-"}</span>
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                <Calendar className="h-4 w-4 shrink-0 text-primary" />
+                <span className="text-foreground">{candidate.osRequest.waktuKerja || "Shift belum diatur"}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="md:col-span-8 space-y-4">
+            <div className="bg-card rounded-xl border p-4 space-y-3 shadow-xs">
+              <div className="flex items-center gap-2 pb-2 border-b text-sm font-semibold text-foreground">
+                <User className="h-4 w-4 text-primary" />
+                Data Pribadi &amp; Kontak
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2.5 text-xs">
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">NIK</span>
+                  <span className="font-medium text-foreground">{candidate.nik || "-"}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Tanggal Pengajuan Akun</span>
+                  <span className="font-medium text-foreground">{request.createdAt ? formatDate(request.createdAt) : "-"}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Email</span>
+                  <span className="font-medium text-foreground">{request.email}</span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Nomor Handphone</span>
+                  <span className="font-medium text-foreground">{request.phone || "-"}</span>
+                </div>
+                <div className="sm:col-span-2">
+                  <span className="text-muted-foreground block text-[11px]">Alamat KTP</span>
+                  <span className="font-medium text-foreground leading-relaxed">{ktpAddress || "-"}</span>
+                </div>
+                <div className="sm:col-span-2">
+                  <span className="text-muted-foreground block text-[11px]">Alamat Domisili</span>
+                  <span className="font-medium text-foreground leading-relaxed">{domisiliAddress}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-card rounded-xl border p-4 space-y-3 shadow-xs">
+              <div className="flex items-center gap-2 pb-2 border-b text-sm font-semibold text-foreground">
+                <CreditCard className="h-4 w-4 text-primary" />
+                Legalitas &amp; Hasil Seleksi
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2.5 text-xs">
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Surat Izin Mengemudi (SIM)</span>
+                  <span className="font-medium text-foreground">
+                    {[candidate.jenisSim, candidate.noSim].filter(Boolean).join(" · ") || "-"}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-muted-foreground block text-[11px]">Hasil Utama DISC</span>
+                  <span className="font-medium text-foreground">{candidate.discType || "-"}</span>
+                </div>
+                {candidate.alasanKeputusan && (
+                  <div className="sm:col-span-2">
+                    <span className="text-muted-foreground block text-[11px]">Alasan Penerimaan SM</span>
+                    <span className="font-medium text-foreground leading-relaxed whitespace-pre-wrap">{candidate.alasanKeputusan}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-card rounded-xl border p-4 space-y-3 shadow-xs">
+              <div className="flex items-center gap-2 pb-2 border-b text-sm font-semibold text-foreground">
+                <FileText className="h-4 w-4 text-primary" />
+                Lampiran Dokumen &amp; Identitas
+              </div>
+              {hasDocuments ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {candidate.fotoKtp && (
+                    <DocumentPreviewTile
+                      label="Foto KTP"
+                      href={candidate.fotoKtp}
+                      isImage={!candidate.fotoKtp.startsWith("data:application/pdf")}
+                    />
+                  )}
+                  {candidate.fotoSim && (
+                    <DocumentPreviewTile
+                      label="Foto SIM"
+                      href={candidate.fotoSim}
+                      isImage={!candidate.fotoSim.startsWith("data:application/pdf")}
+                    />
+                  )}
+                  {candidate.skck && (
+                    <DocumentPreviewTile
+                      label="SKCK"
+                      href={candidate.skck}
+                      isImage={candidate.skck.startsWith("data:image/")}
+                    />
+                  )}
+                  {candidate.hasSkbn && (
+                    <DocumentPreviewTile
+                      label="SKBN"
+                      href={`/api/candidate/${candidate.id}/skbn`}
+                      isImage={Boolean(candidate.skbnIsImage)}
+                    />
+                  )}
+                  {candidate.discReport && (
+                    <DocumentPreviewTile
+                      label="Laporan DISC"
+                      href={candidate.discReport}
+                      isImage={candidate.discReport.startsWith("data:image/")}
+                    />
+                  )}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">Belum ada lampiran dokumen.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+      <DialogFooter className="border-t pt-4">
+        <Button type="button" variant="outline" disabled={busy} onClick={onClose}>
+          Tutup
+        </Button>
+        {request.status === "PENDING" && (
+          <>
+            <Button type="button" variant="outline" disabled={busy} onClick={() => onDecide("REJECTED")}>
+              Tolak
+            </Button>
+            <Button type="button" disabled={busy} onClick={() => onDecide("APPROVED")}>
+              {busy ? "Memproses..." : "Aktivasi Akun"}
+            </Button>
+          </>
+        )}
+      </DialogFooter>
+    </Dialog>
   );
 }
 
@@ -3895,8 +4366,8 @@ export function OSRequestPage() {
     }
     const formElement = event.currentTarget;
     const form = new FormData(formElement);
-    if (needsMitraId && !String(form.get("alasan") || "").trim()) {
-      setError("Alasan pergantian atau pengurangan wajib diisi.");
+    if (!String(form.get("alasan") || "").trim()) {
+      setError("Alasan permintaan wajib diisi.");
       return;
     }
     const selectedProfiles = selectedMitraIds.map((id) => (
@@ -3966,6 +4437,36 @@ export function OSRequestPage() {
   const hasSelectionCapacity = Boolean(
     activeReviewRequest && acceptedCandidateCount < activeReviewRequest.jumlah,
   );
+  const resolveMitraTargets = (item: OSRequest) => {
+    if (item.type !== "PERGANTIAN" && item.type !== "PENGURANGAN") return [];
+    if (item.mitraTargets?.length) {
+      return item.mitraTargets.map((profileId) => {
+        const target = mitras.data.find((mitra) => mitra.mitraProfile?.id === profileId);
+        return {
+          id: target?.mitraProfile?.idMitraOs || item.idMitraOs || item.idPergantian || "-",
+          name: target?.name || null,
+          posisi: target?.mitraProfile?.posisi || null,
+          penempatan: target?.mitraProfile?.penempatan || null,
+        };
+      });
+    }
+    const fallbackId = item.idMitraOs || item.idPergantian;
+    if (!fallbackId) return [];
+    const target = mitras.data.find(
+      (mitra) => mitra.mitraProfile?.idMitraOs === fallbackId || mitra.mitraProfile?.id === fallbackId,
+    );
+    return [{
+      id: fallbackId,
+      name: target?.name || null,
+      posisi: target?.mitraProfile?.posisi || null,
+      penempatan: target?.mitraProfile?.penempatan || null,
+    }];
+  };
+  const activeReviewTargets = activeReviewRequest ? resolveMitraTargets(activeReviewRequest) : [];
+  const activeReviewStatusKey = activeReviewRequest ? getOSRequestStatus(activeReviewRequest.status) : "";
+  const activeReviewRequiresCandidates = Boolean(
+    activeReviewRequest && activeReviewRequest.type !== "PENGURANGAN",
+  );
   const tableHeaders = [
     "Tanggal",
     "Jenis",
@@ -3977,25 +4478,20 @@ export function OSRequestPage() {
     "Pemohon",
     "Vendor",
     "Status",
-    ...(session?.user.role === "SM" ? ["Kandidat"] : []),
+    "Detail",
     ...(session?.user.role === "VENDOR" ? ["Aksi"] : []),
   ];
   const renderRequestRows = (items: OSRequest[]) => (
     <DataTable headers={tableHeaders}>
-      {items.map((item) => (
+      {items.map((item) => {
+        const targetMitras = resolveMitraTargets(item);
+        return (
         <TableRow key={item.id}>
           <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString("id-ID") : "-"}</TableCell>
           <TableCell>{item.type}</TableCell>
           <TableCell>{item.jumlah}</TableCell>
           <TableCell>
-            {(item.type === "PERGANTIAN" || item.type === "PENGURANGAN") ? (
-              item.mitraTargets?.length
-                ? item.mitraTargets.map((profileId) => {
-                    const target = mitras.data.find((mitra) => mitra.mitraProfile?.id === profileId);
-                    return target?.mitraProfile?.idMitraOs || "-";
-                  }).join(", ")
-                : item.idMitraOs || item.idPergantian || "-"
-            ) : "-"}
+            {targetMitras.length ? targetMitras.map((target) => target.id).join(", ") : "-"}
           </TableCell>
           <TableCell>{item.posisi || "-"}</TableCell>
           <TableCell>{item.penempatan || "-"}</TableCell>
@@ -4019,19 +4515,17 @@ export function OSRequestPage() {
             ) : item.vendor?.name || "-"}
           </TableCell>
           <TableCell><StatusBadge status={getOSRequestStatus(item.status)} /></TableCell>
-          {session?.user.role === "SM" && (
-            <TableCell>
-              {getOSRequestStatus(item.status) === "OS_WAITING_SELECTION" ? (
-                <Button size="sm" variant="default" onClick={() => setActiveReviewRequestId(item.id)}>
-                  Tinjau Kandidat
-                </Button>
-              ) : (
-                <Button size="sm" variant="outline" onClick={() => setActiveReviewRequestId(item.id)}>
-                  Lihat Detail
-                </Button>
-              )}
-            </TableCell>
-          )}
+          <TableCell>
+            {session?.user.role === "SM" && getOSRequestStatus(item.status) === "OS_WAITING_SELECTION" ? (
+              <Button size="sm" variant="default" onClick={() => setActiveReviewRequestId(item.id)}>
+                Tinjau Kandidat
+              </Button>
+            ) : (
+              <Button size="sm" variant="outline" onClick={() => setActiveReviewRequestId(item.id)}>
+                Lihat Detail
+              </Button>
+            )}
+          </TableCell>
           {session?.user.role === "VENDOR" && (
             <TableCell>
               {item.status === "VENDOR_SELECTED" ? (
@@ -4085,7 +4579,8 @@ export function OSRequestPage() {
             </TableCell>
           )}
         </TableRow>
-      ))}
+        );
+      })}
     </DataTable>
   );
 
@@ -4214,12 +4709,6 @@ export function OSRequestPage() {
             ) : (
               <div aria-hidden="true" className="min-h-[65px]" />
             )}
-            {needsMitraId && (
-              <label className="space-y-1 text-sm md:col-span-2">
-                Alasan pergantian/pengurangan<RequiredMark />
-                <textarea className={fieldClass} name="alasan" rows={3} maxLength={2000} required />
-              </label>
-            )}
             {!needsMitraId && (
               <>
                 <label className="space-y-1 text-sm">
@@ -4252,6 +4741,23 @@ export function OSRequestPage() {
                 </label>
               </>
             )}
+            <label className="space-y-1 text-sm md:col-span-2">
+              Alasan permintaan<RequiredMark />
+              <textarea
+                className={fieldClass}
+                name="alasan"
+                rows={3}
+                maxLength={2000}
+                required
+                placeholder={
+                  requestType === "PENAMBAHAN"
+                    ? "Tuliskan alasan kebutuhan penambahan tenaga OS..."
+                    : requestType === "PERGANTIAN"
+                      ? "Tuliskan alasan pergantian mitra OS..."
+                      : "Tuliskan alasan pengurangan mitra OS..."
+                }
+              />
+            </label>
             <FormError error={error} />
             {needsMitraId && mitras.error && <FormError error={`Data Mitra OS gagal dimuat: ${mitras.error}`} />}
           </form>
@@ -4327,177 +4833,303 @@ export function OSRequestPage() {
           {!requests.loading && !requests.error && requests.data.length > 0 && renderRequestRows(requests.data)}
         </CardContent></Card>
       )}
-      {session?.user.role === "SM" && (
-        <Dialog
-          open={Boolean(activeReviewRequestId)}
-          onOpenChange={(open) => { if (!open) setActiveReviewRequestId(null); }}
-        >
-          <DialogHeader>
-            <DialogTitle>
-              Seleksi Kandidat — {activeReviewRequest?.posisi || "Request OS"}
-            </DialogTitle>
-            <p className="text-sm text-muted-foreground">
-              Request {activeReviewRequest?.jumlah || 0} orang ·
-              {" "}{activeReviewRequest?.vendor?.name || "Vendor"}
-            </p>
-            <p className="text-sm text-muted-foreground">
-              Kandidat diterima: {acceptedCandidateCount} / {activeReviewRequest?.jumlah || 0}
-              {!hasSelectionCapacity && " · Kuota penerimaan sudah terpenuhi."}
-            </p>
-          </DialogHeader>
-          <DialogContent className="space-y-4">
-            {(!activeReviewRequest?.candidates || activeReviewRequest.candidates.length === 0) ? (
-              <div className="py-8 text-center text-sm text-muted-foreground">
-                <p>Belum ada data kandidat yang dikirim oleh vendor untuk permintaan ini.</p>
-                <p className="mt-1 text-xs">Status saat ini: <span className="font-medium text-foreground">{getOSRequestStatus(activeReviewRequest?.status || "")}</span></p>
+      <Dialog
+        open={Boolean(activeReviewRequestId)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setActiveReviewRequestId(null);
+            setCandidateDecision(null);
+            setCandidateDecisionReason("");
+          }
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle>
+            {session?.user.role === "SM" && activeReviewStatusKey === "OS_WAITING_SELECTION"
+              ? "Detail Request & Seleksi Kandidat"
+              : "Detail Request OS"} — {activeReviewRequest?.posisi || getStatusLabel(activeReviewRequest?.type || "") || "Permintaan"}
+          </DialogTitle>
+          <p className="text-sm text-muted-foreground">
+            {activeReviewRequest ? `${getStatusLabel(activeReviewRequest.type)} · ${activeReviewRequest.jumlah} orang · ${activeReviewRequest.vendor?.name || "Vendor belum dipilih"}` : ""}
+          </p>
+        </DialogHeader>
+        <DialogContent className="space-y-5">
+          {activeReviewRequest && (
+            <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold">Informasi Request OS</h3>
+                <StatusBadge status={activeReviewStatusKey} />
               </div>
-            ) : (
-              activeReviewRequest.candidates.map((candidate) => {
-                const missingFields = getMissingCandidateFields(candidate);
-                return (
-              <div key={candidate.id} className="rounded-lg border p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div className="space-y-1">
-                    <p className="font-medium">{candidate.name}</p>
-                    <p className="text-sm text-muted-foreground">{candidate.email || "-"} · {candidate.phone || "-"}</p>
-                    <p className="text-sm">NIK: {candidate.nik || "-"}</p>
-                    <p className="text-sm">SIM: {candidate.jenisSim || "-"} · {candidate.noSim || "-"}</p>
-                    {candidate.alasanKeputusan && (
-                      <p className="text-sm">Alasan keputusan: {candidate.alasanKeputusan}</p>
-                    )}
-                    <p className="text-sm">
-                      Alamat: {[candidate.provinsi, candidate.kabKota, candidate.kecamatan, candidate.kelurahan, candidate.alamat]
-                        .filter(Boolean).join(", ") || "-"}
-                    </p>
-                    <p className="text-sm">
-                      Alamat domisili: {candidate.domisiliSesuaiKtp === false
-                        ? [candidate.domisiliProvinsi, candidate.domisiliKabKota, candidate.domisiliKecamatan, candidate.domisiliKelurahan, candidate.domisiliAlamat].filter(Boolean).join(", ")
-                        : "Sesuai dengan KTP"}
-                    </p>
-                    <p className="text-sm">Hasil utama DISC: {candidate.discType || "-"}</p>
-                    {candidate.discType && (
-                      <div className="mt-2 rounded-md bg-muted p-3 text-sm">
-                        <p className="font-medium">Ringkasan DISC — {candidate.name}</p>
-                        <p>{({
-                          D: "Dominance: cenderung tegas, berorientasi pada hasil, dan nyaman mengambil keputusan.",
-                          I: "Influence: cenderung komunikatif, persuasif, dan nyaman berinteraksi dengan orang lain.",
-                          S: "Steadiness: cenderung sabar, konsisten, dan menghargai kestabilan serta kerja sama.",
-                          C: "Compliance: cenderung teliti, analitis, dan memperhatikan prosedur serta standar.",
-                        } as Record<string, string>)[candidate.discType] || "Tipe DISC belum dikenali."}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          Gambaran umum berdasarkan tipe utama yang dilaporkan; bukan penilaian psikologis lengkap.
-                        </p>
+              <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                <div>
+                  <p className="text-xs text-muted-foreground">Jenis Permintaan</p>
+                  <p className="font-medium">{getStatusLabel(activeReviewRequest.type)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Tanggal Pengajuan</p>
+                  <p className="font-medium">{activeReviewRequest.createdAt ? formatDate(activeReviewRequest.createdAt) : "-"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Pemohon</p>
+                  <p className="font-medium">{activeReviewRequest.requester?.name || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Posisi</p>
+                  <p className="font-medium">{activeReviewRequest.posisi || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Wilayah Operasional</p>
+                  <p className="font-medium">{activeReviewRequest.penempatan || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Waktu Kerja</p>
+                  <p className="font-medium">{activeReviewRequest.waktuKerja || "-"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground">Jumlah Kebutuhan</p>
+                  <p className="font-medium">{activeReviewRequest.jumlah} orang</p>
+                </div>
+                <div className="sm:col-span-2">
+                  <p className="text-xs text-muted-foreground">Vendor</p>
+                  <p className="font-medium">{activeReviewRequest.vendor?.name || "Belum dipilih"}</p>
+                </div>
+              </div>
+              {activeReviewTargets.length > 0 && (
+                <div className="border-t pt-3">
+                  <p className="mb-1.5 text-xs text-muted-foreground">
+                    {activeReviewRequest.type === "PENGURANGAN" ? "Mitra OS yang Dikurangi" : "Mitra OS yang Diganti"}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {activeReviewTargets.map((target, index) => (
+                      <span
+                        key={`${target.id}-${index}`}
+                        className="inline-flex items-center rounded-md border bg-background px-2.5 py-1 text-xs font-medium"
+                      >
+                        {target.id}
+                        {target.name ? ` — ${target.name}` : ""}
+                        {target.posisi ? ` (${target.posisi})` : ""}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="border-t pt-3">
+                <p className="text-xs text-muted-foreground">Alasan Request</p>
+                <p className="mt-1 whitespace-pre-wrap text-sm">{activeReviewRequest.alasan || "-"}</p>
+              </div>
+              {activeReviewRequest.catatan && (
+                <div className="border-t pt-3">
+                  <p className="text-xs text-muted-foreground">Catatan</p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm">{activeReviewRequest.catatan}</p>
+                </div>
+              )}
+              {activeReviewRequest.approvals && activeReviewRequest.approvals.length > 0 && (
+                <div className="border-t pt-3">
+                  <p className="mb-2 text-xs text-muted-foreground">Riwayat Approval</p>
+                  <div className="space-y-2">
+                    {activeReviewRequest.approvals.map((approval) => (
+                      <div key={approval.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background px-3 py-2 text-xs">
+                        <div>
+                          <span className="font-medium">{approval.level}</span>
+                          {approval.approver?.name ? ` · ${approval.approver.name}` : ""}
+                          {approval.catatan ? (
+                            <p className="mt-0.5 text-muted-foreground">
+                              {approval.status === "REJECTED" ? `Alasan penolakan: ${approval.catatan}` : approval.catatan}
+                            </p>
+                          ) : null}
+                        </div>
+                        <StatusBadge status={approval.status} />
                       </div>
-                    )}
-                    {missingFields.length > 0 && (
-                      <p className="text-sm font-medium text-red-600">
-                        Data wajib belum lengkap: {missingFields.join(", ")}. Data lain yang opsional tidak perlu dilengkapi.
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {candidate.status === "KANDIDAT" ? (
-                      <>
-                        <Button
-                          disabled={candidateActionId === candidate.id || !hasSelectionCapacity || missingFields.length > 0}
-                          onClick={() => startCandidateDecision(candidate.id, "APPROVED")}
-                        >
-                          Terima
-                        </Button>
-                        <Button variant="outline" disabled={candidateActionId === candidate.id} onClick={() => startCandidateDecision(candidate.id, "REJECTED")}>
-                          Tolak
-                        </Button>
-                      </>
-                    ) : <StatusBadge status={candidate.status} />}
+                    ))}
                   </div>
                 </div>
-                {candidateDecision?.candidateId === candidate.id && (
-                  <div className={`mt-4 space-y-3 rounded-md border p-3 ${candidateDecision.decision === "REJECTED" ? "border-red-300 bg-red-50" : "bg-muted"}`}>
-                    <label className="block space-y-1 text-sm font-medium">
-                      {candidateDecision.decision === "REJECTED" ? "Alasan kandidat ditolak" : "Alasan kandidat diterima"}<RequiredMark />
-                      <textarea
-                        className={fieldClass}
-                        rows={3}
-                        value={candidateDecisionReason}
-                        onChange={(event) => setCandidateDecisionReason(event.target.value)}
-                        maxLength={2000}
-                        required
-                        placeholder={candidateDecision.decision === "REJECTED" ? "Tuliskan alasan penolakan kandidat..." : "Tuliskan alasan penerimaan kandidat..."}
-                      />
-                    </label>
-                    <div className="flex justify-end gap-2">
-                      <Button type="button" variant="outline" onClick={() => setCandidateDecision(null)}>Batal</Button>
-                      <Button type="button" disabled={candidateActionId === candidate.id || !candidateDecisionReason.trim()} onClick={decideCandidate}>
-                        {candidateActionId === candidate.id ? "Menyimpan..." : "Simpan keputusan"}
-                      </Button>
-                    </div>
-                  </div>
-                )}
-                <div className="mt-3 flex flex-wrap gap-3">
-                  {candidate.fotoKtp && (
-                    <div className="space-y-1">
-                      <span className="text-[11px] font-medium text-muted-foreground">Foto KTP</span>
-                      <a href={candidate.fotoKtp} target="_blank" rel="noreferrer" className="block">
-                        <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={candidate.fotoKtp} alt={`Foto KTP ${candidate.name}`} />
-                      </a>
-                    </div>
-                  )}
-                  {candidate.fotoSim && (
-                    <div className="space-y-1">
-                      <span className="text-[11px] font-medium text-muted-foreground">Foto SIM</span>
-                      <a href={candidate.fotoSim} target="_blank" rel="noreferrer" className="block">
-                        <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={candidate.fotoSim} alt={`Foto SIM ${candidate.name}`} />
-                      </a>
-                    </div>
-                  )}
-                  {candidate.skck && (
-                    <div className="space-y-1">
-                      <span className="text-[11px] font-medium text-muted-foreground">SKCK</span>
-                      <a href={candidate.skck} target="_blank" rel="noreferrer" className="block">
-                        {candidate.skck.startsWith("data:application/pdf") ? (
-                          <div className="flex h-24 w-24 flex-col items-center justify-center rounded border bg-muted/40 p-2 text-center hover:bg-muted/70 transition">
-                            <FileText className="h-8 w-8 text-primary" />
-                            <span className="mt-1 text-[10px] font-medium leading-tight">SKCK (PDF)</span>
-                          </div>
-                        ) : (
-                          <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={candidate.skck} alt={`SKCK ${candidate.name}`} />
-                        )}
-                      </a>
-                    </div>
-                  )}
-                  {candidate.discReport && (
-                    <div className="space-y-1">
-                      <span className="text-[11px] font-medium text-muted-foreground">Laporan DISC</span>
-                      <a href={candidate.discReport} target="_blank" rel="noreferrer" className="block">
-                        {candidate.discReport.startsWith("data:application/pdf") ? (
-                          <div className="flex h-24 w-24 flex-col items-center justify-center rounded border bg-muted/40 p-2 text-center hover:bg-muted/70 transition">
-                            <FileText className="h-8 w-8 text-primary" />
-                            <span className="mt-1 text-[10px] font-medium leading-tight">DISC (PDF)</span>
-                          </div>
-                        ) : (
-                          <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={candidate.discReport} alt={`Laporan DISC ${candidate.name}`} />
-                        )}
-                      </a>
-                    </div>
-                  )}
-                  {candidate.hasSkbn && (
-                    <div className="space-y-1">
-                      <span className="text-[11px] font-medium text-muted-foreground">SKBN</span>
-                      <a href={`/api/candidate/${candidate.id}/skbn`} target="_blank" rel="noreferrer" className="block">
-                        {candidate.skbnIsImage
-                          ? <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={`/api/candidate/${candidate.id}/skbn`} alt={`SKBN ${candidate.name}`} />
-                          : <div className="flex h-24 w-24 flex-col items-center justify-center rounded border bg-muted/40 p-2 text-center hover:bg-muted/70 transition"><FileText className="h-8 w-8 text-primary" /><span className="mt-1 text-[10px] font-medium leading-tight text-primary underline">Lihat SKBN (PDF)</span></div>}
-                      </a>
-                    </div>
-                  )}
-                </div>
-              </div>
-              );
-            })
+              )}
+            </div>
           )}
-          </DialogContent>
-        </Dialog>
-      )}
+
+          {!activeReviewRequiresCandidates ? (
+            <div className="rounded-lg border border-dashed p-4 text-center text-sm text-muted-foreground">
+              Permintaan pengurangan tenaga OS tidak memerlukan pengajuan maupun seleksi kandidat baru.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold">Data &amp; Seleksi Kandidat</h3>
+                {Boolean(activeReviewRequest?.candidates?.length) && (
+                  <p className="text-xs text-muted-foreground">
+                    Kandidat diterima: <span className="font-medium text-foreground">{acceptedCandidateCount} / {activeReviewRequest?.jumlah || 0}</span>
+                    {!hasSelectionCapacity && " · Kuota penerimaan sudah terpenuhi."}
+                  </p>
+                )}
+              </div>
+
+              {(!activeReviewRequest?.candidates || activeReviewRequest.candidates.length === 0) ? (
+                <div className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+                  <p>Belum ada data kandidat yang dikirim oleh vendor untuk permintaan ini.</p>
+                  <p className="mt-1 text-xs">
+                    Tahap saat ini: <span className="font-medium text-foreground">{getStatusLabel(activeReviewStatusKey)}</span>
+                  </p>
+                </div>
+              ) : session?.user.role === "SM" ? (
+                activeReviewRequest.candidates.map((candidate) => {
+                  const missingFields = getMissingCandidateFields(candidate);
+                  return (
+                    <div key={candidate.id} className="rounded-lg border p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <p className="font-medium">{candidate.name}</p>
+                          <p className="text-sm text-muted-foreground">{candidate.email || "-"} · {candidate.phone || "-"}</p>
+                          <p className="text-sm">NIK: {candidate.nik || "-"}</p>
+                          <p className="text-sm">SIM: {candidate.jenisSim || "-"} · {candidate.noSim || "-"}</p>
+                          {candidate.alasanKeputusan && (
+                            <p className="text-sm">Alasan keputusan: {candidate.alasanKeputusan}</p>
+                          )}
+                          <p className="text-sm">
+                            Alamat: {[candidate.provinsi, candidate.kabKota, candidate.kecamatan, candidate.kelurahan, candidate.alamat]
+                              .filter(Boolean).join(", ") || "-"}
+                          </p>
+                          <p className="text-sm">
+                            Alamat domisili: {candidate.domisiliSesuaiKtp === false
+                              ? [candidate.domisiliProvinsi, candidate.domisiliKabKota, candidate.domisiliKecamatan, candidate.domisiliKelurahan, candidate.domisiliAlamat].filter(Boolean).join(", ")
+                              : "Sesuai dengan KTP"}
+                          </p>
+                          <p className="text-sm">Hasil utama DISC: {candidate.discType || "-"}</p>
+                          {candidate.discType && (
+                            <div className="mt-2 rounded-md bg-muted p-3 text-sm">
+                              <p className="font-medium">Ringkasan DISC — {candidate.name}</p>
+                              <p>{({
+                                D: "Dominance: cenderung tegas, berorientasi pada hasil, dan nyaman mengambil keputusan.",
+                                I: "Influence: cenderung komunikatif, persuasif, dan nyaman berinteraksi dengan orang lain.",
+                                S: "Steadiness: cenderung sabar, konsisten, dan menghargai kestabilan serta kerja sama.",
+                                C: "Compliance: cenderung teliti, analitis, dan memperhatikan prosedur serta standar.",
+                              } as Record<string, string>)[candidate.discType] || "Tipe DISC belum dikenali."}</p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                Gambaran umum berdasarkan tipe utama yang dilaporkan; bukan penilaian psikologis lengkap.
+                              </p>
+                            </div>
+                          )}
+                          {missingFields.length > 0 && (
+                            <p className="text-sm font-medium text-red-600">
+                              Data wajib belum lengkap: {missingFields.join(", ")}. Data lain yang opsional tidak perlu dilengkapi.
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {candidate.status === "KANDIDAT" ? (
+                            <>
+                              <Button
+                                disabled={candidateActionId === candidate.id || !hasSelectionCapacity || missingFields.length > 0}
+                                onClick={() => startCandidateDecision(candidate.id, "APPROVED")}
+                              >
+                                Terima
+                              </Button>
+                              <Button variant="outline" disabled={candidateActionId === candidate.id} onClick={() => startCandidateDecision(candidate.id, "REJECTED")}>
+                                Tolak
+                              </Button>
+                            </>
+                          ) : <StatusBadge status={candidate.status} />}
+                        </div>
+                      </div>
+                      {candidateDecision?.candidateId === candidate.id && (
+                        <div className={`mt-4 space-y-3 rounded-md border p-3 ${candidateDecision.decision === "REJECTED" ? "border-red-300 bg-red-50" : "bg-muted"}`}>
+                          <label className="block space-y-1 text-sm font-medium">
+                            {candidateDecision.decision === "REJECTED" ? "Alasan kandidat ditolak" : "Alasan kandidat diterima"}<RequiredMark />
+                            <textarea
+                              className={fieldClass}
+                              rows={3}
+                              value={candidateDecisionReason}
+                              onChange={(event) => setCandidateDecisionReason(event.target.value)}
+                              maxLength={2000}
+                              required
+                              placeholder={candidateDecision.decision === "REJECTED" ? "Tuliskan alasan penolakan kandidat..." : "Tuliskan alasan penerimaan kandidat..."}
+                            />
+                          </label>
+                          <div className="flex justify-end gap-2">
+                            <Button type="button" variant="outline" onClick={() => setCandidateDecision(null)}>Batal</Button>
+                            <Button type="button" disabled={candidateActionId === candidate.id || !candidateDecisionReason.trim()} onClick={decideCandidate}>
+                              {candidateActionId === candidate.id ? "Menyimpan..." : "Simpan keputusan"}
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      <div className="mt-3 flex flex-wrap gap-3">
+                        {candidate.fotoKtp && (
+                          <div className="space-y-1">
+                            <span className="text-[11px] font-medium text-muted-foreground">Foto KTP</span>
+                            <a href={candidate.fotoKtp} target="_blank" rel="noreferrer" className="block">
+                              <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={candidate.fotoKtp} alt={`Foto KTP ${candidate.name}`} />
+                            </a>
+                          </div>
+                        )}
+                        {candidate.fotoSim && (
+                          <div className="space-y-1">
+                            <span className="text-[11px] font-medium text-muted-foreground">Foto SIM</span>
+                            <a href={candidate.fotoSim} target="_blank" rel="noreferrer" className="block">
+                              <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={candidate.fotoSim} alt={`Foto SIM ${candidate.name}`} />
+                            </a>
+                          </div>
+                        )}
+                        {candidate.skck && (
+                          <div className="space-y-1">
+                            <span className="text-[11px] font-medium text-muted-foreground">SKCK</span>
+                            <a href={candidate.skck} target="_blank" rel="noreferrer" className="block">
+                              {candidate.skck.startsWith("data:application/pdf") ? (
+                                <div className="flex h-24 w-24 flex-col items-center justify-center rounded border bg-muted/40 p-2 text-center hover:bg-muted/70 transition">
+                                  <FileText className="h-8 w-8 text-primary" />
+                                  <span className="mt-1 text-[10px] font-medium leading-tight">SKCK (PDF)</span>
+                                </div>
+                              ) : (
+                                <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={candidate.skck} alt={`SKCK ${candidate.name}`} />
+                              )}
+                            </a>
+                          </div>
+                        )}
+                        {candidate.discReport && (
+                          <div className="space-y-1">
+                            <span className="text-[11px] font-medium text-muted-foreground">Laporan DISC</span>
+                            <a href={candidate.discReport} target="_blank" rel="noreferrer" className="block">
+                              {candidate.discReport.startsWith("data:application/pdf") ? (
+                                <div className="flex h-24 w-24 flex-col items-center justify-center rounded border bg-muted/40 p-2 text-center hover:bg-muted/70 transition">
+                                  <FileText className="h-8 w-8 text-primary" />
+                                  <span className="mt-1 text-[10px] font-medium leading-tight">DISC (PDF)</span>
+                                </div>
+                              ) : (
+                                <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={candidate.discReport} alt={`Laporan DISC ${candidate.name}`} />
+                              )}
+                            </a>
+                          </div>
+                        )}
+                        {candidate.hasSkbn && (
+                          <div className="space-y-1">
+                            <span className="text-[11px] font-medium text-muted-foreground">SKBN</span>
+                            <a href={`/api/candidate/${candidate.id}/skbn`} target="_blank" rel="noreferrer" className="block">
+                              {candidate.skbnIsImage
+                                ? <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={`/api/candidate/${candidate.id}/skbn`} alt={`SKBN ${candidate.name}`} />
+                                : <div className="flex h-24 w-24 flex-col items-center justify-center rounded border bg-muted/40 p-2 text-center hover:bg-muted/70 transition"><FileText className="h-8 w-8 text-primary" /><span className="mt-1 text-[10px] font-medium leading-tight text-primary underline">Lihat SKBN (PDF)</span></div>}
+                            </a>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="space-y-2">
+                  {activeReviewRequest.candidates.map((candidate) => (
+                    <div key={candidate.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-4 py-3 text-sm">
+                      <div>
+                        <p className="font-medium">{candidate.name}</p>
+                        <p className="text-xs text-muted-foreground">{candidate.email || "-"}</p>
+                      </div>
+                      <StatusBadge status={candidate.status} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
       {session?.user.role === "VENDOR" && (
         <Dialog
           open={Boolean(activeSkbnRequestId)}
@@ -4614,12 +5246,27 @@ export function ApprovalPage() {
   const approvals = useApiData<Approval[]>("/api/approval", []);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [rejectTargetId, setRejectTargetId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState("");
+  const rejectTarget = approvals.data.find((item) => item.id === rejectTargetId) || null;
 
-  async function decide(approvalId: string, status: "APPROVED" | "REJECTED") {
+  async function decide(approvalId: string, status: "APPROVED" | "REJECTED", catatan?: string) {
     setError(null);
+    if (status === "REJECTED" && !catatan?.trim()) {
+      setError("Alasan penolakan wajib diisi.");
+      return;
+    }
     setBusyId(approvalId);
     try {
-      await sendJson("/api/approval", "POST", { approvalId, status });
+      await sendJson("/api/approval", "POST", {
+        approvalId,
+        status,
+        ...(catatan?.trim() ? { catatan: catatan.trim() } : {}),
+      });
+      if (status === "REJECTED") {
+        setRejectTargetId(null);
+        setRejectReason("");
+      }
       approvals.reload();
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Gagal memproses approval.");
@@ -4628,17 +5275,126 @@ export function ApprovalPage() {
     }
   }
 
+  function submitReject(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!rejectTarget) return;
+    decide(rejectTarget.id, "REJECTED", rejectReason);
+  }
+
   return (
     <FeaturePage title="Approval Request" description="Tinjau dan berikan keputusan untuk request OS." roles={["GM", "COO"]}>
       <FormError error={error} />
       <Card><CardContent className="p-0">
         <LoadingError loading={approvals.loading} error={approvals.error} empty={!approvals.data.length} />
         {!approvals.loading && !approvals.error && approvals.data.length > 0 && (
-          <DataTable headers={["Tanggal", "Level", "Jenis", "Jumlah", "Posisi", "Pemohon", "Status", "Aksi"]}>
-            {approvals.data.map((item) => <TableRow key={item.id}><TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString("id-ID") : "-"}</TableCell><TableCell>{item.level}</TableCell><TableCell>{item.osRequest.type}</TableCell><TableCell>{item.osRequest.jumlah}</TableCell><TableCell>{item.osRequest.posisi || "-"}</TableCell><TableCell>{item.osRequest.requester?.name || "-"}</TableCell><TableCell><StatusBadge status={item.status} /></TableCell><TableCell>{item.status === "PENDING" && <div className="flex gap-2"><Button disabled={busyId === item.id} onClick={() => decide(item.id, "APPROVED")}>Setujui</Button><Button variant="outline" disabled={busyId === item.id} onClick={() => decide(item.id, "REJECTED")}>Tolak</Button></div>}</TableCell></TableRow>)}
+          <DataTable headers={["Tanggal", "Level", "Jenis", "Jumlah", "Posisi", "Wilayah", "Alasan Request", "Pemohon", "Status", "Aksi"]}>
+            {approvals.data.map((item) => (
+              <TableRow key={item.id}>
+                <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString("id-ID") : "-"}</TableCell>
+                <TableCell>{item.level}</TableCell>
+                <TableCell>{getStatusLabel(item.osRequest.type)}</TableCell>
+                <TableCell>{item.osRequest.jumlah}</TableCell>
+                <TableCell>{item.osRequest.posisi || "-"}</TableCell>
+                <TableCell>{item.osRequest.penempatan || "-"}</TableCell>
+                <TableCell className="max-w-xs whitespace-pre-wrap text-xs">{item.osRequest.alasan || "-"}</TableCell>
+                <TableCell>{item.osRequest.requester?.name || "-"}</TableCell>
+                <TableCell>
+                  <div className="space-y-1">
+                    <StatusBadge status={item.status} />
+                    {item.catatan && (
+                      <p className="max-w-xs whitespace-pre-wrap text-xs text-muted-foreground">
+                        {item.status === "REJECTED" ? `Alasan penolakan: ${item.catatan}` : item.catatan}
+                      </p>
+                    )}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  {item.status === "PENDING" && (
+                    <div className="flex gap-2">
+                      <Button size="sm" disabled={busyId === item.id} onClick={() => decide(item.id, "APPROVED")}>
+                        Setujui
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={busyId === item.id}
+                        onClick={() => {
+                          setError(null);
+                          setRejectTargetId(item.id);
+                          setRejectReason("");
+                        }}
+                      >
+                        Tolak
+                      </Button>
+                    </div>
+                  )}
+                </TableCell>
+              </TableRow>
+            ))}
           </DataTable>
         )}
       </CardContent></Card>
+      <Dialog
+        open={Boolean(rejectTarget)}
+        onOpenChange={(open) => {
+          if (!open && busyId !== rejectTarget?.id) {
+            setRejectTargetId(null);
+            setRejectReason("");
+          }
+        }}
+      >
+        <DialogHeader>
+          <DialogTitle>Tolak Request OS ({rejectTarget?.level})</DialogTitle>
+          <p className="text-sm text-muted-foreground">
+            {rejectTarget
+              ? `${getStatusLabel(rejectTarget.osRequest.type)} · ${rejectTarget.osRequest.jumlah} orang · ${rejectTarget.osRequest.posisi || "-"} (${rejectTarget.osRequest.penempatan || "-"})`
+              : ""}
+          </p>
+        </DialogHeader>
+        <DialogContent className="space-y-4">
+          {rejectTarget?.osRequest.alasan && (
+            <div className="rounded-md border bg-muted/30 p-3 text-sm">
+              <p className="text-xs text-muted-foreground">Alasan dari Pemohon ({rejectTarget.osRequest.requester?.name || "-"})</p>
+              <p className="mt-1 whitespace-pre-wrap">{rejectTarget.osRequest.alasan}</p>
+            </div>
+          )}
+          <form id="approval-reject-form" onSubmit={submitReject} className="space-y-3">
+            <label className="block space-y-1 text-sm font-medium">
+              Alasan penolakan<RequiredMark />
+              <textarea
+                className={fieldClass}
+                rows={4}
+                maxLength={2000}
+                required
+                value={rejectReason}
+                onChange={(event) => setRejectReason(event.target.value)}
+                placeholder="Tuliskan alasan penolakan permintaan OS..."
+              />
+            </label>
+          </form>
+        </DialogContent>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busyId === rejectTarget?.id}
+            onClick={() => {
+              setRejectTargetId(null);
+              setRejectReason("");
+            }}
+          >
+            Batal
+          </Button>
+          <Button
+            type="submit"
+            form="approval-reject-form"
+            variant="destructive"
+            disabled={!rejectTarget || busyId === rejectTarget.id || !rejectReason.trim()}
+          >
+            {busyId === rejectTarget?.id ? "Menyimpan..." : "Konfirmasi Tolak"}
+          </Button>
+        </DialogFooter>
+      </Dialog>
     </FeaturePage>
   );
 }

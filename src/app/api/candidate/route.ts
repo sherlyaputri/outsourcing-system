@@ -272,6 +272,11 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    const niks = normalizedCandidates.map((candidate) => candidate.nik);
+    if (new Set(niks).size !== niks.length) {
+      return NextResponse.json({ error: "NIK setiap kandidat harus berbeda." }, { status: 400 });
+    }
+
     const emails = normalizedCandidates.map((candidate) => candidate.email);
     if (new Set(emails).size !== emails.length) {
       return NextResponse.json({ error: "Email setiap kandidat harus berbeda." }, { status: 400 });

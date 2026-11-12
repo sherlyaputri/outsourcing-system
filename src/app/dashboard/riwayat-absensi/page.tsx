@@ -10,9 +10,10 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, ChevronRight, Download, History } from "lucide-react";
+import { Download, History } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { DEFAULT_PAGE_SIZE as PAGE_SIZE, TablePagination } from "@/components/ui/table-pagination";
 import { getShiftStartAt } from "@/lib/attendance-shift";
 
 interface AttendanceRecord {
@@ -52,7 +53,6 @@ function formatLocalYmd(date: Date) {
 }
 
 const MAX_MATRIX_DAYS = 62;
-const PAGE_SIZE = 25;
 
 function buildAttendanceDateParams(startDate: string, endDate: string) {
   const params = new URLSearchParams();
@@ -66,54 +66,6 @@ function buildAttendanceDateParams(startDate: string, endDate: string) {
     if (hasEnd) params.set("endDate", endDate);
   }
   return params;
-}
-
-function TablePagination({
-  totalItems,
-  currentPage,
-  onPageChange,
-}: {
-  totalItems: number;
-  currentPage: number;
-  onPageChange: (page: number) => void;
-}) {
-  const totalPages = Math.max(1, Math.ceil(totalItems / PAGE_SIZE));
-  const safePage = Math.min(Math.max(1, currentPage), totalPages);
-  const startItem = totalItems === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
-  const endItem = Math.min(safePage * PAGE_SIZE, totalItems);
-
-  return (
-    <div className="flex flex-col gap-2 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-      <span className="text-xs text-muted-foreground">
-        Menampilkan {startItem}–{endItem} dari {totalItems} baris
-      </span>
-      <div className="flex items-center gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => onPageChange(safePage - 1)}
-          disabled={safePage <= 1}
-        >
-          <ChevronLeft className="mr-1 h-4 w-4" />
-          Sebelumnya
-        </Button>
-        <span className="min-w-24 text-center text-xs text-muted-foreground">
-          Halaman {safePage} / {totalPages}
-        </span>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => onPageChange(safePage + 1)}
-          disabled={safePage >= totalPages}
-        >
-          Berikutnya
-          <ChevronRight className="ml-1 h-4 w-4" />
-        </Button>
-      </div>
-    </div>
-  );
 }
 
 function getDateColumns(startDate: string, endDate: string) {

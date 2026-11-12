@@ -38,13 +38,36 @@ export async function POST(req: NextRequest) {
     const body = await req.json();
     const { approvalId, status, catatan } = body;
 
+    if (!approvalId || typeof approvalId !== "string") {
+      return NextResponse.json({ error: "ID approval tidak valid" }, { status: 400 });
+    }
+
     if (!["APPROVED", "REJECTED"].includes(status)) {
       return NextResponse.json({ error: "Status tidak valid" }, { status: 400 });
     }
 
+    const trimmedNote = typeof catatan === "string" ? catatan.trim() : "";
+    if (status === "REJECTED" && !trimmedNote) {
+      return NextResponse.json({ error: "Alasan penolakan wajib diisi." }, { status: 400 });
+    }
+    if (catatan !== undefined && catatan !== null && (typeof catatan !== "string" || trimmedNote.length > 2000)) {
+      return NextResponse.json({ error: "Alasan penolakan maksimal 2.000 karakter." }, { status: 400 });
+    }
+
+    const existing = await prisma.approval.findUnique({ where: { id: approvalId } });
+    if (!existing) {
+      return NextResponse.json({ error: "Data approval tidak ditemukan" }, { status: 404 });
+    }
+    if (existing.level !== session.user.role) {
+      return NextResponse.json({ error: "Anda tidak berwenang memproses approval level ini" }, { status: 403 });
+    }
+    if (existing.status !== "PENDING") {
+      return NextResponse.json({ error: "Approval ini sudah diproses sebelumnya" }, { status: 409 });
+    }
+
     const approval = await prisma.approval.update({
       where: { id: approvalId },
-      data: { status, catatan },
+      data: { status, catatan: trimmedNote || null },
     });
 
     // If GM approves, create COO approval

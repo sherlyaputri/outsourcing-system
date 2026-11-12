@@ -20,7 +20,9 @@ export async function GET(req: NextRequest) {
         return NextResponse.json({ error: "Akun vendor tidak memiliki vendor terkait" }, { status: 403 });
       }
       where = { vendorId: session.user.vendorId };
-    } else if (session.user.role !== "VM") {
+    } else if (session.user.role === "VM") {
+      where = { status: { not: "REJECTED" } };
+    } else {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
@@ -128,10 +130,10 @@ export async function POST(req: NextRequest) {
     }
 
     const needsMitraId = type === "PERGANTIAN" || type === "PENGURANGAN";
-    if (needsMitraId && (typeof alasan !== "string" || !alasan.trim())) {
-      return NextResponse.json({ error: "Alasan pergantian atau pengurangan wajib diisi." }, { status: 400 });
+    if (typeof alasan !== "string" || !alasan.trim()) {
+      return NextResponse.json({ error: "Alasan permintaan wajib diisi." }, { status: 400 });
     }
-    if (alasan !== undefined && alasan !== null && (typeof alasan !== "string" || alasan.length > 2000)) {
+    if (alasan.length > 2000) {
       return NextResponse.json({ error: "Alasan maksimal 2.000 karakter." }, { status: 400 });
     }
     const mitraOsIds = needsMitraId
@@ -223,7 +225,7 @@ export async function POST(req: NextRequest) {
           posisi: effectivePosition,
           penempatan: effectivePlacement,
           waktuKerja: effectiveWorkHours,
-          alasan: needsMitraId ? alasan.trim() : null,
+          alasan: alasan.trim(),
           requesterId: session.user.id,
           vendorId: targetVendorId || null,
           vendorNotifiedAt: targetVendorId ? new Date() : null,
