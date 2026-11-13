@@ -51,12 +51,13 @@ export async function GET() {
         }),
         prisma.mitraProfile.findMany({
           where: { vendorId: session.user.vendorId, dokumenDeadlineAt: { not: null } },
-          select: { documents: { select: { name: true } } },
+          select: { posisi: true, fotoSelfie: true, user: { select: { avatar: true } }, documents: { select: { name: true } } },
         }),
       ]);
-      const requiredDocuments = ["Ijazah", "Kartu Keluarga", "Foto Seluruh Badan", "SKBN"];
       const incompleteAdditionalDocuments = mitraDocumentProfiles.filter((profile) =>
-        requiredDocuments.some((name) => !profile.documents.some((document) => document.name === name)),
+        ["Ijazah", "Kartu Keluarga", "Foto Seluruh Badan", ...( /^(OS002|OS005)\b/.test(profile.posisi || "") ? ["Hasil Tes Mengemudi"] : [])]
+          .some((name) => !profile.documents.some((document) => document.name === name)) ||
+        (!profile.user.avatar && !profile.fotoSelfie && !profile.documents.some((document) => ["Foto Profil", "Pas Foto"].includes(document.name))),
       ).length;
       // Count only requests that still need vendor action. Informational notices are displayed separately.
       counts["/dashboard/request-os"] = requests;

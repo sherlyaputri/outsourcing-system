@@ -135,6 +135,7 @@ export async function PUT(req: NextRequest) {
       skck,
       documents,
       fotoSelfie,
+      fotoProfil,
     } = body;
 
     if (typeof userId !== "string" || !userId.trim()) {
@@ -185,6 +186,17 @@ export async function PUT(req: NextRequest) {
       }
       uploadedImages[field] = value;
     }
+    let uploadedProfilePhoto: string | undefined;
+    if (fotoProfil !== undefined) {
+      if (typeof fotoProfil !== "string") {
+        return NextResponse.json({ error: "Foto Profil tidak valid." }, { status: 400 });
+      }
+      const match = fotoProfil.match(/^data:image\/(?:jpeg|png);base64,([A-Za-z0-9+/]+=*)$/);
+      if (!match || Buffer.from(match[1], "base64").length > maxProfileImageBytes) {
+        return NextResponse.json({ error: "Foto Profil harus JPG/PNG maksimal 5 MB." }, { status: 400 });
+      }
+      uploadedProfilePhoto = fotoProfil;
+    }
     let uploadedSkck: string | undefined;
     if (skck !== undefined) {
       if (typeof skck !== "string") {
@@ -229,13 +241,13 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: "Total ukuran dokumen maksimal 15 MB per unggahan." }, { status: 400 });
     }
 
-    if (!uploadedImages.fotoSelfie) {
+    if (!uploadedProfilePhoto) {
       const photoDoc = validatedDocuments.find((d) =>
         (d.name === "Foto Profil" || d.name === "Pas Foto") &&
         d.mimeType.startsWith("image/")
       );
       if (photoDoc) {
-        uploadedImages.fotoSelfie = photoDoc.content;
+        uploadedProfilePhoto = photoDoc.content;
       }
     }
 
@@ -266,7 +278,7 @@ export async function PUT(req: NextRequest) {
         data: {
           name: name.trim(),
           email: email.trim().toLowerCase(),
-          ...(uploadedImages.fotoSelfie ? { avatar: uploadedImages.fotoSelfie } : {}),
+          ...(uploadedProfilePhoto ? { avatar: uploadedProfilePhoto } : {}),
         },
       });
       if (phone === null || typeof phone === "string") {

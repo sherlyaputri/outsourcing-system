@@ -569,13 +569,16 @@ export function MitraManagementPage() {
                 {(session?.user.role === "VENDOR" || session?.user.role === "VM") && (
                   <TableCell>
                     {mitra.mitraProfile?.dokumenDeadlineAt ? (() => {
-                      const requiredDocuments = ["Ijazah", "Kartu Keluarga", "Foto Seluruh Badan", "SKBN"];
                       const uploadedNames = new Set(mitra.mitraProfile.documents?.map((document) => document.name) || []);
-                      const missingCount = requiredDocuments.filter((name) => !uploadedNames.has(name)).length;
+                      const isDriver = /^(OS002|OS005)\b/.test(mitra.mitraProfile.posisi || "");
+                      const requiredDocuments = ["Ijazah", "Kartu Keluarga", "Foto Seluruh Badan", ...(isDriver ? ["Hasil Tes Mengemudi"] : [])];
+                      const hasProfilePhoto = Boolean(mitra.avatar || mitra.mitraProfile.fotoSelfie || uploadedNames.has("Foto Profil") || uploadedNames.has("Pas Foto"));
+                      const missingDocuments = [...requiredDocuments.filter((name) => !uploadedNames.has(name)), ...(!hasProfilePhoto ? ["Foto Profil"] : [])];
                       return (
                         <div className="min-w-36 text-xs">
                           <p>Tenggat: {new Date(mitra.mitraProfile.dokumenDeadlineAt).toLocaleDateString("id-ID")}</p>
-                          <p>{missingCount === 0 ? "Dokumen lengkap" : `${missingCount} dokumen belum lengkap`}</p>
+                          <p>{missingDocuments.length === 0 ? "Dokumen lengkap" : `${missingDocuments.length} dokumen belum lengkap`}</p>
+                          {missingDocuments.length > 0 && <p className="mt-1 text-muted-foreground">Kurang: {missingDocuments.join(", ")}</p>}
                         </div>
                       );
                     })() : "-"}
@@ -769,11 +772,8 @@ function MitraDetailDialog({
   const profile = mitra.mitraProfile;
   const profilePhotoDoc = profile?.documents?.find(
     (d) =>
-      (d.name === "Foto Seluruh Badan" ||
-        d.name === "Foto Profil" ||
+      (d.name === "Foto Profil" ||
         d.name === "Pas Foto" ||
-        d.name.toLowerCase().includes("foto") ||
-        d.name.toLowerCase().includes("badan") ||
         d.name.toLowerCase().includes("profil")) &&
       d.mimeType?.startsWith("image/")
   );
@@ -985,19 +985,21 @@ function MitraDetailDialog({
                 <div className="pt-2 border-t space-y-1.5">
                   <span className="text-[11px] font-medium text-muted-foreground block">Dokumen Tambahan:</span>
                   <div className="flex flex-wrap gap-2">
-                    {profile.documents.map((doc) => (
-                      <a
-                        key={doc.id}
-                        href={`/api/mitra/${mitra.id}/documents/${doc.id}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs bg-muted hover:bg-muted/80 text-foreground border transition-colors"
-                      >
-                        <FileText className="h-3.5 w-3.5 text-primary" />
-                        <span>{doc.name}</span>
-                        <ExternalLink className="h-3 w-3 text-muted-foreground" />
-                      </a>
-                    ))}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                      {profile.documents.map((doc) => {
+                        const documentUrl = `/api/mitra/${mitra.id}/documents/${doc.id}`;
+                        return (
+                          <a key={doc.id} href={documentUrl} target="_blank" rel="noreferrer" className="space-y-1 rounded-lg border bg-muted/20 p-2 hover:bg-muted/50">
+                            <span className="block text-[11px] font-medium text-foreground">{doc.name}</span>
+                            {doc.mimeType.startsWith("image/") ? (
+                              <img src={documentUrl} alt={doc.name} className="h-24 w-full rounded object-contain" />
+                            ) : (
+                              <span className="flex h-24 items-center justify-center gap-1 text-xs text-primary underline"><FileText className="h-4 w-4" />Lihat dokumen</span>
+                            )}
+                          </a>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               )}
@@ -1127,6 +1129,12 @@ function DocumentFileInput({
         />
       </div>
 
+      {hasExisting && existingUrl && accept.startsWith("image/") && (
+        <a href={existingUrl} target="_blank" rel="noreferrer" className="block w-fit overflow-hidden rounded-md border bg-muted/20" onClick={(event) => event.stopPropagation()}>
+          <img src={existingUrl} alt={existingFileName || label} className="h-24 max-w-40 object-contain" />
+        </a>
+      )}
+
       {helpText && <p className="text-[11px] text-muted-foreground leading-relaxed">{helpText}</p>}
     </div>
   );
@@ -1186,8 +1194,13 @@ function MitraEditDialog({
   const existingKkUrl = kkDoc ? `/api/mitra/${mitra.id}/documents/${kkDoc.id}` : null;
   const existingKkName = kkDoc ? "Dokumen Kartu Keluarga (Tersimpan)" : null;
 
+  const drivingTestDoc = profile?.documents?.find((d) => d.name === "Hasil Tes Mengemudi");
+  const existingDrivingTestUrl = drivingTestDoc ? `/api/mitra/${mitra.id}/documents/${drivingTestDoc.id}` : null;
+  const existingDrivingTestName = drivingTestDoc ? "Hasil Tes Mengemudi (Tersimpan)" : null;
+  const isDriverPosition = /^(OS002|OS005)\b/.test(profile?.posisi || "");
+
   const otherDocs =
-    profile?.documents?.filter((d) => !["Foto Seluruh Badan", "Ijazah", "Kartu Keluarga", "SKBN"].includes(d.name)) || [];
+    profile?.documents?.filter((d) => !["Foto Seluruh Badan", "Ijazah", "Kartu Keluarga", "SKBN", "Hasil Tes Mengemudi"].includes(d.name)) || [];
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1200,6 +1213,7 @@ function MitraEditDialog({
         ["ijazah", "Ijazah"],
         ["kartuKeluarga", "Kartu Keluarga"],
         ["fotoSeluruhBadan", "Foto Seluruh Badan"],
+        ...(isDriverPosition ? [["hasilTesMengemudi", "Hasil Tes Mengemudi"]] : []),
         ["skbn", "SKBN"],
       ].flatMap(([field, name]) => {
         const file = form.get(field);
@@ -1221,7 +1235,7 @@ function MitraEditDialog({
       })));
       const fotoKtp = form.get("fotoKtp");
       const fotoSim = form.get("fotoSim");
-      const fotoSelfie = form.get("fotoSelfie");
+      const fotoSelfie = form.get("fotoProfil");
       const skck = form.get("skck");
       if (skck instanceof File && skck.size > 5 * 1024 * 1024) {
         throw new Error("Ukuran SKCK maksimal 5 MB.");
@@ -1263,7 +1277,7 @@ function MitraEditDialog({
         jenisSim: form.get("jenisSim"),
         noSim: form.get("noSim"),
         documents,
-        ...(selfiePayload ? { fotoSelfie: selfiePayload } : {}),
+        ...(selfiePayload ? { fotoProfil: selfiePayload } : {}),
         ...(skck instanceof File && skck.size > 0 ? { skck: await readImage(skck) } : {}),
         ...(fotoKtp instanceof File && fotoKtp.size > 0 ? { fotoKtp: await readImage(fotoKtp) } : {}),
         ...(fotoSim instanceof File && fotoSim.size > 0 ? { fotoSim: await readImage(fotoSim) } : {}),
@@ -1375,7 +1389,7 @@ function MitraEditDialog({
               <div className="grid gap-3.5 md:grid-cols-2 pt-1">
                 {/* 1. FOTO DIRI: PAS FOTO & FOTO SELURUH BADAN */}
                 <DocumentFileInput
-                  name="fotoSelfie"
+                  name="fotoProfil"
                   label="Foto Profil / Pas Foto Mitra (Wajah / Setengah Badan)"
                   accept="image/jpeg,image/png"
                   existingFileName={existingSelfieName}
@@ -1441,6 +1455,15 @@ function MitraEditDialog({
                   existingUrl={existingKkUrl}
                   helpText="Kartu Keluarga asli atau fotokopi jelas."
                 />
+                {isDriverPosition && (
+                  <DocumentFileInput
+                    name="hasilTesMengemudi"
+                    label="Hasil Tes Mengemudi (PDF/JPG/PNG, maks. 5 MB)"
+                    existingFileName={existingDrivingTestName}
+                    existingUrl={existingDrivingTestUrl}
+                    helpText="Wajib khusus untuk OS002 Driver Delivery & Pickup dan OS005 Driver Ondemand."
+                  />
+                )}
 
                 {/* 5. DOKUMEN TAMBAHAN LAINNYA */}
                 <div className="md:col-span-2">
