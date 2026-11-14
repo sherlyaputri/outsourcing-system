@@ -12,10 +12,11 @@ interface CandidatePayload {
   name: string;
   nik: string;
   fotoKtp: string;
-  jenisSim: string;
-  noSim: string;
-  fotoSim: string;
+  jenisSim: string | null;
+  noSim: string | null;
+  fotoSim: string | null;
   skck: string;
+  fotoSeluruhBadan: string;
   phone: string;
   email: string;
   alamat: string;
@@ -53,15 +54,73 @@ function isValidSkck(value: unknown): value is string {
   return size > 0 && size <= maxImageBytes;
 }
 
+function requiresSim(position?: string | null) {
+  return /^(OS002|OS003|OS004|OS005)\b/.test(position || "");
+}
+
+function requiredSimTypes(position?: string | null) {
+  if (/^OS002\b/.test(position || "")) return ["A"];
+  if (/^OS003\b|^OS004\b/.test(position || "")) return ["C"];
+  if (/^OS005\b/.test(position || "")) return ["B1", "B2"];
+  return [];
+}
+
+function isValidDocument(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  const match = value.match(/^data:(application\/pdf|image\/jpeg|image\/png);base64,([A-Za-z0-9+/]+=*)$/);
+  return Boolean(match && Buffer.from(match[2], "base64").length > 0 && Buffer.from(match[2], "base64").length <= maxImageBytes);
+}
+
 function isCandidatePayload(candidate: Record<string, unknown>): candidate is Record<string, unknown> & CandidatePayload {
   return [
-    "name", "nik", "fotoKtp", "jenisSim", "noSim", "fotoSim", "skck", "phone", "email",
+    "name", "nik", "fotoKtp", "fotoSeluruhBadan", "skck", "phone", "email",
     "alamat", "kelurahan", "kecamatan", "kabKota", "provinsi",
     "domisiliAlamat", "domisiliKelurahan", "domisiliKecamatan", "domisiliKabKota",
     "domisiliProvinsi",
   ].every((field) => typeof candidate[field] === "string")
     && typeof candidate.domisiliSesuaiKtp === "boolean"
     && (candidate.vendorEmployeeId === null || typeof candidate.vendorEmployeeId === "string");
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session || !["VM", "SM", "VENDOR"].includes(session.user.role)) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    const candidateId = new URL(req.url).searchParams.get("candidateId");
+    if (!candidateId) return NextResponse.json({ error: "Kandidat tidak valid." }, { status: 400 });
+
+    const candidate = await prisma.candidate.findUnique({
+      where: { id: candidateId },
+      select: {
+        id: true,
+        fotoKtp: true,
+        fotoSeluruhBadan: true,
+        fotoSim: true,
+        skck: true,
+        formInterview: true,
+        hasilTesMengemudi: true,
+        accountRequest: { select: { requesterId: true, vendorId: true } },
+        osRequest: { select: { requesterId: true } },
+      },
+    });
+    if (!candidate) return NextResponse.json({ error: "Kandidat tidak ditemukan." }, { status: 404 });
+
+    const canView = session.user.role === "VM"
+      || (session.user.role === "SM" && candidate.osRequest.requesterId === session.user.id)
+      || (session.user.role === "VENDOR" && (
+        candidate.accountRequest?.requesterId === session.user.id
+        || Boolean(session.user.vendorId && candidate.accountRequest?.vendorId === session.user.vendorId)
+      ));
+    if (!canView) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+    const { accountRequest: _accountRequest, osRequest: _osRequest, ...documents } = candidate;
+    return NextResponse.json(documents);
+  } catch (error) {
+    console.error("Candidate documents GET error:", error);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -94,7 +153,7 @@ export async function POST(req: NextRequest) {
         vendorId,
         status: "VENDOR_SELECTED",
       },
-      select: { id: true, jumlah: true, type: true, mitraTargets: true },
+      select: { id: true, jumlah: true, type: true, posisi: true, mitraTargets: true },
     });
 
     if (!osRequest) {
@@ -146,9 +205,10 @@ export async function POST(req: NextRequest) {
         name: employee.name,
         nik: employee.nik,
         fotoKtp: employee.fotoKtp,
-        jenisSim: employee.jenisSim,
-        noSim: employee.noSim,
-        fotoSim: employee.fotoSim,
+        fotoSeluruhBadan: candidate.fotoSeluruhBadan,
+        jenisSim: requiresSim(osRequest.posisi) ? employee.jenisSim : null,
+        noSim: requiresSim(osRequest.posisi) ? employee.noSim : null,
+        fotoSim: requiresSim(osRequest.posisi) ? employee.fotoSim : null,
         skck: employee.skck,
         phone: employee.phone,
         email: employee.email,
@@ -186,14 +246,19 @@ export async function POST(req: NextRequest) {
       if (!isValidImage(candidate.fotoKtp)) {
         return NextResponse.json({ error: "Foto KTP wajib berupa JPG/PNG dan maksimal 5 MB." }, { status: 400 });
       }
-      if (typeof candidate.jenisSim !== "string" || !["A", "B1", "B2", "C", "D"].includes(candidate.jenisSim)) {
-        return NextResponse.json({ error: "Pilih jenis SIM yang tersedia." }, { status: 400 });
+      if (!isValidImage(candidate.fotoSeluruhBadan)) {
+        return NextResponse.json({ error: "Foto seluruh badan wajib berupa JPG/PNG dan maksimal 5 MB." }, { status: 400 });
       }
-      if (typeof candidate.noSim !== "string" || !/^\d+$/.test(candidate.noSim.trim())) {
-        return NextResponse.json({ error: "No. SIM hanya boleh berisi angka." }, { status: 400 });
-      }
-      if (!isValidImage(candidate.fotoSim)) {
-        return NextResponse.json({ error: "Foto SIM wajib berupa JPG/PNG dan maksimal 5 MB." }, { status: 400 });
+      if (requiresSim(osRequest.posisi)) {
+        if (typeof candidate.jenisSim !== "string" || !requiredSimTypes(osRequest.posisi).includes(candidate.jenisSim)) {
+          return NextResponse.json({ error: `Pilih jenis SIM yang sesuai posisi: ${requiredSimTypes(osRequest.posisi).join(" atau ")}.` }, { status: 400 });
+        }
+        if (typeof candidate.noSim !== "string" || !/^\d+$/.test(candidate.noSim.trim())) {
+          return NextResponse.json({ error: "No. SIM hanya boleh berisi angka." }, { status: 400 });
+        }
+        if (!isValidImage(candidate.fotoSim)) {
+          return NextResponse.json({ error: "Foto SIM wajib berupa JPG/PNG dan maksimal 5 MB." }, { status: 400 });
+        }
       }
       if (!isValidSkck(candidate.skck)) {
         return NextResponse.json({ error: "SKCK wajib berupa PDF/JPG/PNG maksimal 5 MB." }, { status: 400 });
@@ -242,8 +307,8 @@ export async function POST(req: NextRequest) {
         ...candidate,
         name: candidate.name.trim(),
         nik: candidate.nik.trim(),
-        jenisSim: candidate.jenisSim.trim(),
-        noSim: candidate.noSim.trim(),
+        jenisSim: requiresSim(osRequest.posisi) ? String(candidate.jenisSim).trim() : null,
+        noSim: requiresSim(osRequest.posisi) ? String(candidate.noSim).trim() : null,
         phone: candidate.phone.trim(),
         email: candidate.email.trim().toLowerCase(),
         alamat: candidate.alamat.trim(),
@@ -304,8 +369,9 @@ export async function POST(req: NextRequest) {
     const totalPhotoBytes = normalizedCandidates.reduce((total, candidate) => (
       total +
       Buffer.from(candidate.fotoKtp.split(",")[1], "base64").length +
-      Buffer.from(candidate.fotoSim.split(",")[1], "base64").length
-      + Buffer.from(candidate.skck.split(",")[1], "base64").length
+      (candidate.fotoSim ? Buffer.from(candidate.fotoSim.split(",")[1], "base64").length : 0)
+        + Buffer.from(candidate.skck.split(",")[1], "base64").length
+      + Buffer.from(candidate.fotoSeluruhBadan.split(",")[1], "base64").length
     ), 0);
     if (totalPhotoBytes > 15 * 1024 * 1024) {
       return NextResponse.json({ error: "Total ukuran foto per pengiriman maksimal 15 MB." }, { status: 400 });
@@ -356,7 +422,8 @@ export async function POST(req: NextRequest) {
             fotoKtp: candidate.fotoKtp,
             jenisSim: candidate.jenisSim,
             noSim: candidate.noSim,
-            fotoSim: candidate.fotoSim,
+            fotoSim: requiresSim(osRequest.posisi) ? candidate.fotoSim : null,
+            fotoSeluruhBadan: candidate.fotoSeluruhBadan,
             skck: candidate.skck,
             phone: candidate.phone,
             email: emails[index],
@@ -402,7 +469,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { candidateId, decision } = body;
+    const { candidateId, decision, formInterview, hasilTesMengemudi } = body;
     if (!isNonEmptyString(candidateId) || !["APPROVED", "REJECTED"].includes(decision)) {
       return NextResponse.json({ error: "Keputusan kandidat tidak valid." }, { status: 400 });
     }
@@ -411,6 +478,14 @@ export async function PATCH(req: NextRequest) {
     }
     if (body.alasanKeputusan.trim().length > 2000) {
       return NextResponse.json({ error: "Alasan keputusan maksimal 2.000 karakter." }, { status: 400 });
+    }
+    if (!isValidDocument(formInterview)) {
+      return NextResponse.json({ error: "Form Interview wajib berupa PDF/JPG/PNG maksimal 5 MB." }, { status: 400 });
+    }
+    const candidatePosition = await prisma.candidate.findUnique({ where: { id: candidateId }, select: { osRequest: { select: { posisi: true } } } });
+    if (!candidatePosition) return NextResponse.json({ error: "Kandidat tidak ditemukan." }, { status: 404 });
+    if (/^(OS002|OS005)\b/.test(candidatePosition.osRequest.posisi || "") && !isValidDocument(hasilTesMengemudi)) {
+      return NextResponse.json({ error: "Hasil Tes Mengemudi wajib berupa PDF/JPG/PNG maksimal 5 MB untuk posisi ini." }, { status: 400 });
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -428,6 +503,7 @@ export async function PATCH(req: NextRequest) {
           name: true,
           nik: true,
           fotoKtp: true,
+          fotoSeluruhBadan: true,
           jenisSim: true,
           noSim: true,
           fotoSim: true,
@@ -445,7 +521,7 @@ export async function PATCH(req: NextRequest) {
           domisiliKecamatan: true,
           domisiliKabKota: true,
           domisiliProvinsi: true,
-          osRequest: { select: { jumlah: true } },
+          osRequest: { select: { jumlah: true, posisi: true } },
         },
       });
       if (!candidate) return null;
@@ -455,9 +531,8 @@ export async function PATCH(req: NextRequest) {
           ["Nama Mitra", candidate.name],
           ["NIK", candidate.nik],
           ["Foto KTP", candidate.fotoKtp],
-          ["Jenis SIM", candidate.jenisSim],
-          ["Nomor SIM", candidate.noSim],
-          ["Foto SIM", candidate.fotoSim],
+          ["Foto Seluruh Badan", candidate.fotoSeluruhBadan],
+          ...(requiresSim(candidate.osRequest.posisi) ? [["Jenis SIM", candidate.jenisSim], ["Nomor SIM", candidate.noSim], ["Foto SIM", candidate.fotoSim]] as [string, string | null][] : []),
           ["SKCK", candidate.skck],
           ["No. HP", candidate.phone],
           ["Email", candidate.email],
@@ -492,6 +567,8 @@ export async function PATCH(req: NextRequest) {
         data: {
           status: decision === "APPROVED" ? "TERPILIH" : "DITOLAK",
           alasanKeputusan: body.alasanKeputusan.trim(),
+          formInterview,
+          hasilTesMengemudi: /^(OS002|OS005)\b/.test(candidatePosition.osRequest.posisi || "") ? hasilTesMengemudi : null,
           ...(decision === "APPROVED" ? { acceptedAt: new Date() } : {}),
         },
       });

@@ -46,6 +46,7 @@ interface Mitra {
     idMitraOs?: string | null;
     vendorId?: string;
     waktuKerja?: string | null;
+    skbnDeadlineAt?: string | null;
     posisi?: string | null;
     penempatan?: string | null;
     fotoSelfie?: string | null;
@@ -60,7 +61,6 @@ interface Mitra {
     domisiliKecamatan?: string | null;
     domisiliKabKota?: string | null;
     domisiliProvinsi?: string | null;
-    dokumenDeadlineAt?: string | null;
     fotoKtp?: string | null;
     jenisSim?: string | null;
     noSim?: string | null;
@@ -84,6 +84,9 @@ interface OSCandidate {
   phone?: string | null;
   nik?: string | null;
   fotoKtp?: string | null;
+  fotoSeluruhBadan?: string | null;
+  formInterview?: string | null;
+  hasilTesMengemudi?: string | null;
   jenisSim?: string | null;
   noSim?: string | null;
   fotoSim?: string | null;
@@ -101,20 +104,15 @@ interface OSCandidate {
   domisiliProvinsi?: string | null;
   status: string;
   alasanKeputusan?: string | null;
-  hasSkbn?: boolean;
-  skbnIsImage?: boolean;
   accountRequest?: { status: string } | null;
 }
 
-function getMissingCandidateFields(candidate: OSCandidate): string[] {
+function getMissingCandidateFields(candidate: OSCandidate, position?: string | null): string[] {
+  // Document contents are intentionally loaded only when opened. The API validates the stored files on decision.
   const requiredFields: [string, string | null | undefined][] = [
     ["Nama Mitra", candidate.name],
     ["NIK", candidate.nik],
-    ["Foto KTP", candidate.fotoKtp],
-    ["Jenis SIM", candidate.jenisSim],
-    ["Nomor SIM", candidate.noSim],
-    ["Foto SIM", candidate.fotoSim],
-    ["SKCK", candidate.skck],
+    ...(needsSim(position) ? [["Jenis SIM", candidate.jenisSim], ["Nomor SIM", candidate.noSim]] as [string, string | null | undefined][] : []),
     ["No. HP", candidate.phone],
     ["Email", candidate.email],
     ["Alamat", candidate.alamat],
@@ -142,12 +140,13 @@ interface AccountRequest {
     id: string;
     nik?: string | null;
     fotoKtp?: string | null;
+    fotoSeluruhBadan?: string | null;
+    formInterview?: string | null;
+    hasilTesMengemudi?: string | null;
     jenisSim?: string | null;
     noSim?: string | null;
     fotoSim?: string | null;
     skck?: string | null;
-    hasSkbn?: boolean;
-    skbnIsImage?: boolean;
     alamat?: string | null;
     kelurahan?: string | null;
     kecamatan?: string | null;
@@ -168,6 +167,7 @@ interface CandidateDraft {
   name: string;
   nik: string;
   fotoKtp: File | null;
+  fotoSeluruhBadan: File | null;
   jenisSim: string;
   noSim: string;
   fotoSim: File | null;
@@ -192,8 +192,8 @@ interface VendorEmployee {
   status: string;
   name: string;
   nik: string;
-  jenisSim: string;
-  noSim: string;
+  jenisSim?: string | null;
+  noSim?: string | null;
   email: string;
   phone: string;
   alamat: string;
@@ -286,6 +286,23 @@ interface OSRequest {
   vendor?: { name: string } | null;
   approvals?: OSRequestApproval[];
   candidates?: OSCandidate[];
+}
+
+function needsSim(position?: string | null) {
+  if (!position) return true;
+  return /^(OS002|OS003|OS004|OS005)\b/.test(position || "");
+}
+
+function isDriverPosition(position?: string | null) {
+  return /^(OS002|OS005)\b/.test(position || "");
+}
+
+function simTypesForPosition(position?: string | null) {
+  if (!position) return ["A", "B1", "B2", "C", "D"];
+  if (/^OS002\b/.test(position || "")) return ["A"];
+  if (/^OS003\b|^OS004\b/.test(position || "")) return ["C"];
+  if (/^OS005\b/.test(position || "")) return ["B1", "B2"];
+  return [];
 }
 
 function getOSRequestStatus(status: string) {
@@ -520,6 +537,7 @@ export function MitraManagementPage() {
   const [detailMitra, setDetailMitra] = useState<Mitra | null>(null);
   const [credentialMitra, setCredentialMitra] = useState<Mitra | null>(null);
   const [shiftMitra, setShiftMitra] = useState<Mitra | null>(null);
+  const [skbnMitra, setSkbnMitra] = useState<Mitra | null>(null);
   return (
     <FeaturePage title="Data Mitra OS" description="Daftar mitra OS dan ID yang digunakan untuk request pergantian atau pengurangan." roles={["VENDOR", "VM", "SM"]}>
       <Card><CardContent className="p-0">
@@ -530,7 +548,7 @@ export function MitraManagementPage() {
             headers={[
               "ID Mitra OS", "Nama", "Email", "Vendor", "Posisi", "Penempatan", "Shift",
               ...(session?.user.role === "VENDOR" ? ["Kredensial Awal"] : []),
-              ...(session?.user.role === "VENDOR" || session?.user.role === "VM" ? ["Dokumen Tambahan"] : []),
+              ...(session?.user.role === "VENDOR" || session?.user.role === "VM" ? ["SKBN"] : []),
               "Detail Data", "Status",
             ]}
           >
@@ -563,20 +581,10 @@ export function MitraManagementPage() {
                 )}
                 {(session?.user.role === "VENDOR" || session?.user.role === "VM") && (
                   <TableCell>
-                    {mitra.mitraProfile?.dokumenDeadlineAt ? (() => {
-                      const uploadedNames = new Set(mitra.mitraProfile.documents?.map((document) => document.name) || []);
-                      const isDriver = /^(OS002|OS005)\b/.test(mitra.mitraProfile.posisi || "");
-                      const requiredDocuments = ["Ijazah", "Kartu Keluarga", "Foto Seluruh Badan", ...(isDriver ? ["Hasil Tes Mengemudi"] : [])];
-                      const hasProfilePhoto = Boolean(mitra.avatar || mitra.mitraProfile.fotoSelfie || uploadedNames.has("Foto Profil") || uploadedNames.has("Pas Foto"));
-                      const missingDocuments = [...requiredDocuments.filter((name) => !uploadedNames.has(name)), ...(!hasProfilePhoto ? ["Foto Profil"] : [])];
-                      return (
-                        <div className="min-w-36 text-xs">
-                          <p>Tenggat: {new Date(mitra.mitraProfile.dokumenDeadlineAt).toLocaleDateString("id-ID")}</p>
-                          <p>{missingDocuments.length === 0 ? "Dokumen lengkap" : `${missingDocuments.length} dokumen belum lengkap`}</p>
-                          {missingDocuments.length > 0 && <p className="mt-1 text-muted-foreground">Kurang: {missingDocuments.join(", ")}</p>}
-                        </div>
-                      );
-                    })() : "-"}
+                    <div className="min-w-32 text-xs">
+                      <p>{mitra.mitraProfile?.documents?.some((document) => document.name === "SKBN") ? "Sudah diunggah" : "Belum diunggah"}</p>
+                      <p className="text-muted-foreground">Tenggat: {mitra.mitraProfile?.skbnDeadlineAt ? new Date(mitra.mitraProfile.skbnDeadlineAt).toLocaleDateString("id-ID") : "Menunggu penetapan"}</p>
+                    </div>
                   </TableCell>
                 )}
                 <TableCell>
@@ -606,6 +614,7 @@ export function MitraManagementPage() {
                         <Edit className="mr-1 h-3 w-3" />Ubah shift
                       </Button>
                     )}
+                    {session?.user.role === "VENDOR" && mitra.mitraProfile && ["ACTIVE", "CLOSED"].includes(mitra.status) && <Button size="sm" variant="ghost" className="text-xs h-6 px-2" onClick={() => setSkbnMitra(mitra)}>Unggah SKBN</Button>}
                   </div>
                 </TableCell>
                 <TableCell><StatusBadge status={mitra.status} /></TableCell>
@@ -625,6 +634,7 @@ export function MitraManagementPage() {
         />
       )}
       {shiftMitra && <MitraShiftDialog mitra={shiftMitra} onClose={() => setShiftMitra(null)} onSaved={() => { setShiftMitra(null); mitras.reload(); }} />}
+      {skbnMitra && <Dialog open onOpenChange={(open) => { if (!open) setSkbnMitra(null); }}><DialogContent><DialogHeader><DialogTitle>SKBN — {skbnMitra.name}</DialogTitle></DialogHeader><MitraSkbnUpload userId={skbnMitra.id} onUploaded={() => mitras.reload()} /></DialogContent></Dialog>}
       {detailMitra && (
         <MitraDetailDialog
           mitra={detailMitra}
@@ -703,9 +713,66 @@ export function MitraProfilePage() {
           <Button onClick={() => setEditing(true)}><Edit className="mr-2 h-4 w-4" />Edit data saya</Button>
         </>}
       </CardContent></Card>
+      {mitra?.mitraProfile && <MitraSkbnUpload />}
       {editing && mitra && <MitraEditDialog mitra={mitra} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); mitras.reload(); }} />}
     </FeaturePage>
   );
+}
+
+function MitraSkbnUpload({ userId, onUploaded }: { userId?: string; onUploaded?: () => void }) {
+  const [status, setStatus] = useState<{ deadline: string | null; uploaded: boolean } | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const url = userId ? `/api/mitra/skbn?userId=${encodeURIComponent(userId)}` : "/api/mitra/skbn";
+  useEffect(() => {
+    let active = true;
+    fetch(url).then(async (response) => {
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Status SKBN gagal dimuat.");
+      return result as { deadline: string | null; uploaded: boolean };
+    }).then((result) => { if (active) setStatus(result); }).catch((loadError) => {
+      if (active) setError(loadError instanceof Error ? loadError.message : "Status SKBN gagal dimuat.");
+    }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [url]);
+
+  async function upload(file: File) {
+    setError(null);
+    if (!["application/pdf", "image/jpeg", "image/png"].includes(file.type) || file.size === 0 || file.size > 5 * 1024 * 1024) {
+      setError("SKBN harus berupa PDF/JPG/PNG maksimal 5 MB.");
+      return;
+    }
+    setUploading(true);
+    try {
+      await sendJson("/api/mitra/skbn", "PUT", { ...(userId ? { userId } : {}), skbn: await readImage(file) });
+      const response = await fetch(url);
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Status SKBN gagal dimuat.");
+      setStatus(result);
+      onUploaded?.();
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "SKBN gagal diunggah.");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  const content = <div className="space-y-3">
+    <p className="text-sm">{loading ? "Memuat status SKBN..." : status?.uploaded ? "SKBN sudah diserahkan." : "SKBN wajib diserahkan maksimal 14 hari setelah aktivasi akun."}</p>
+    {status?.deadline && <p className="text-xs text-muted-foreground">Tenggat: {new Date(status.deadline).toLocaleDateString("id-ID")}</p>}
+    <label className="block space-y-1 text-sm">
+      <span>{status?.uploaded ? "Ganti dokumen SKBN" : "Unggah SKBN (PDF/JPG/PNG, maksimal 5 MB)"}</span>
+      <input className={fieldClass} type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" disabled={uploading || loading} onChange={(event) => {
+        const file = event.target.files?.[0];
+        event.target.value = "";
+        if (file) void upload(file);
+      }} />
+    </label>
+    {uploading && <p className="text-xs text-muted-foreground">Mengunggah SKBN...</p>}
+    <FormError error={error} />
+  </div>;
+  return userId ? content : <Card><CardHeader><CardTitle className="text-lg">Dokumen SKBN</CardTitle></CardHeader><CardContent>{content}</CardContent></Card>;
 }
 
 function CredentialDialog({
@@ -975,7 +1042,7 @@ function MitraDetailDialog({
                 <div>
                   <span className="text-muted-foreground block text-[11px]">Surat Izin Mengemudi (SIM)</span>
                   <span className="font-medium text-foreground">
-                    {[profile?.jenisSim, profile?.noSim].filter(Boolean).join(" · ") || "-"}
+                    {needsSim(profile?.posisi) ? ([profile?.jenisSim, profile?.noSim].filter(Boolean).join(" · ") || "-") : "Tidak diperlukan untuk posisi ini"}
                   </span>
                 </div>
                 <div>
@@ -1012,7 +1079,7 @@ function MitraDetailDialog({
                     </a>
                   </div>
                 )}
-                {profile?.fotoSim && (
+                {needsSim(profile?.posisi) && profile?.fotoSim && (
                   <div className="space-y-1">
                     <span className="text-[11px] font-medium text-muted-foreground block">Foto SIM</span>
                     <a href={profile.fotoSim} target="_blank" rel="noreferrer" className="block group overflow-hidden rounded-lg border bg-muted/20">
@@ -1234,29 +1301,7 @@ function MitraEditDialog({
   const existingSkckUrl = profile?.skck || null;
   const existingSkckName = existingSkckUrl ? "Dokumen SKCK (Tersimpan)" : null;
 
-  const skbnDoc = profile?.documents?.find((d) => d.name === "SKBN");
-  const existingSkbnUrl = skbnDoc ? `/api/mitra/${mitra.id}/documents/${skbnDoc.id}` : null;
-  const existingSkbnName = skbnDoc ? "Dokumen SKBN (Tersimpan)" : null;
-
-  const badanDoc = profile?.documents?.find((d) => d.name === "Foto Seluruh Badan");
-  const existingBadanUrl = badanDoc ? `/api/mitra/${mitra.id}/documents/${badanDoc.id}` : null;
-  const existingBadanName = badanDoc ? "Foto Seluruh Badan (Tersimpan)" : null;
-
-  const ijazahDoc = profile?.documents?.find((d) => d.name === "Ijazah");
-  const existingIjazahUrl = ijazahDoc ? `/api/mitra/${mitra.id}/documents/${ijazahDoc.id}` : null;
-  const existingIjazahName = ijazahDoc ? "Dokumen Ijazah (Tersimpan)" : null;
-
-  const kkDoc = profile?.documents?.find((d) => d.name === "Kartu Keluarga");
-  const existingKkUrl = kkDoc ? `/api/mitra/${mitra.id}/documents/${kkDoc.id}` : null;
-  const existingKkName = kkDoc ? "Dokumen Kartu Keluarga (Tersimpan)" : null;
-
-  const drivingTestDoc = profile?.documents?.find((d) => d.name === "Hasil Tes Mengemudi");
-  const existingDrivingTestUrl = drivingTestDoc ? `/api/mitra/${mitra.id}/documents/${drivingTestDoc.id}` : null;
-  const existingDrivingTestName = drivingTestDoc ? "Hasil Tes Mengemudi (Tersimpan)" : null;
-  const isDriverPosition = /^(OS002|OS005)\b/.test(profile?.posisi || "");
-
-  const otherDocs =
-    profile?.documents?.filter((d) => !["Foto Seluruh Badan", "Ijazah", "Kartu Keluarga", "SKBN", "Hasil Tes Mengemudi"].includes(d.name)) || [];
+  const otherDocs = profile?.documents?.filter((d) => !["Foto Seluruh Badan", "Form Interview", "Hasil Tes Mengemudi"].includes(d.name)) || [];
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1265,17 +1310,6 @@ function MitraEditDialog({
     const form = new FormData(event.currentTarget);
     try {
       const files = form.getAll("documents").filter((file): file is File => file instanceof File && file.size > 0);
-      const additionalDocuments = [
-        ["ijazah", "Ijazah"],
-        ["kartuKeluarga", "Kartu Keluarga"],
-        ["fotoSeluruhBadan", "Foto Seluruh Badan"],
-        ...(isDriverPosition ? [["hasilTesMengemudi", "Hasil Tes Mengemudi"]] : []),
-        ["skbn", "SKBN"],
-      ].flatMap(([field, name]) => {
-        const file = form.get(field);
-        return file instanceof File && file.size > 0 ? [{ file, name }] : [];
-      });
-      files.push(...additionalDocuments.map(({ file }) => file));
       for (const file of files) {
         if (!["application/pdf", "image/jpeg", "image/png"].includes(file.type)) {
           throw new Error("Dokumen harus berupa PDF, JPG, atau PNG.");
@@ -1286,7 +1320,7 @@ function MitraEditDialog({
       }
 
       const documents = await Promise.all(files.map(async (file) => ({
-        name: additionalDocuments.find((item) => item.file === file)?.name || file.name,
+        name: file.name,
         content: await readImage(file),
       })));
       const fotoKtp = form.get("fotoKtp");
@@ -1395,15 +1429,15 @@ function MitraEditDialog({
               </select>
               <p className="text-xs text-muted-foreground">Perubahan shift dilakukan oleh VM atau SM.</p>
             </label>
-            <label className="space-y-1 text-sm">Jenis SIM<OptionalMark />
+            {needsSim(profile?.posisi) && <label className="space-y-1 text-sm">Jenis SIM<OptionalMark />
               <select className={fieldClass} name="jenisSim" defaultValue={mitra.mitraProfile?.jenisSim || ""}>
                 <option value="">Pilih jenis SIM</option>
-                {["A", "B1", "B2", "C", "D"].map((kind) => <option key={kind} value={kind}>SIM {kind}</option>)}
+                {simTypesForPosition(profile?.posisi).map((kind) => <option key={kind} value={kind}>SIM {kind}</option>)}
               </select>
-            </label>
-            <label className="space-y-1 text-sm">Nomor SIM<OptionalMark />
+            </label>}
+            {needsSim(profile?.posisi) && <label className="space-y-1 text-sm">Nomor SIM<OptionalMark />
               <input className={fieldClass} name="noSim" defaultValue={mitra.mitraProfile?.noSim || ""} />
-            </label>
+            </label>}
             <p className="text-sm font-medium md:col-span-2">Alamat sesuai KTP</p>
             <RegionPicker value={address} required={false} onChange={(field, value) => {
               if (field === "provinsi" || field === "kabKota" || field === "kecamatan" || field === "kelurahan") {
@@ -1437,14 +1471,11 @@ function MitraEditDialog({
                 <FileText className="h-4 w-4 text-primary" />
                 <div>
                   <h4 className="font-semibold text-sm text-foreground">Foto & Dokumen Persyaratan Mitra OS</h4>
-                  <p className="text-xs text-muted-foreground">
-                    Unggah pas foto profil, foto seluruh badan, kartu identitas, dan berkas persyaratan resmi Mitra OS.
-                    {mitra.mitraProfile?.dokumenDeadlineAt && ` Tenggat: ${new Date(mitra.mitraProfile.dokumenDeadlineAt).toLocaleDateString("id-ID")}.`}
-                  </p>
+                  <p className="text-xs text-muted-foreground">Perbarui foto profil dan dokumen identitas Mitra OS.</p>
                 </div>
               </div>
               <div className="grid gap-3.5 md:grid-cols-2 pt-1">
-                {/* 1. FOTO DIRI: PAS FOTO & FOTO SELURUH BADAN */}
+                {/* FOTO DIRI */}
                 <DocumentFileInput
                   name="fotoProfil"
                   label="Foto Profil / Pas Foto Mitra (Wajah / Setengah Badan)"
@@ -1453,16 +1484,8 @@ function MitraEditDialog({
                   existingUrl={existingSelfieUrl}
                   helpText="Pas foto formal wajah/setengah badan latar polos untuk avatar profil akun & absensi."
                 />
-                <DocumentFileInput
-                  name="fotoSeluruhBadan"
-                  label="Foto Seluruh Badan / Full Body (JPG/PNG, maks. 5 MB)"
-                  accept="image/jpeg,image/png"
-                  existingFileName={existingBadanName}
-                  existingUrl={existingBadanUrl}
-                  helpText="Foto berdiri tegak kepala hingga kaki dengan seragam/pakaian rapi untuk verifikasi postur fisik."
-                />
 
-                {/* 2. IDENTITAS RESMI: KTP & SIM */}
+                {/* IDENTITAS RESMI */}
                 <DocumentFileInput
                   name="fotoKtp"
                   label="Foto KTP (JPG/PNG, maks. 5 MB)"
@@ -1471,16 +1494,16 @@ function MitraEditDialog({
                   existingUrl={existingKtpUrl}
                   helpText="Unggah foto e-KTP asli yang jelas dan tidak buram."
                 />
-                <DocumentFileInput
+                {needsSim(profile?.posisi) && <DocumentFileInput
                   name="fotoSim"
                   label="Foto SIM (JPG/PNG, maks. 5 MB)"
                   accept="image/jpeg,image/png"
                   existingFileName={existingSimName}
                   existingUrl={existingSimUrl}
-                  helpText="Unggah foto SIM (opsional, jika posisi pengemudi atau memiliki SIM)."
-                />
+                  helpText="Unggah foto SIM sesuai persyaratan posisi."
+                />}
 
-                {/* 3. SURAT KETERANGAN RESMI: SKCK & SKBN */}
+                {/* SURAT KETERANGAN RESMI */}
                 <DocumentFileInput
                   name="skck"
                   label="SKCK (PDF/JPG/PNG, maks. 5 MB)"
@@ -1489,40 +1512,8 @@ function MitraEditDialog({
                   existingUrl={existingSkckUrl}
                   helpText="Surat Keterangan Catatan Kepolisian yang masih berlaku."
                 />
-                <DocumentFileInput
-                  name="skbn"
-                  label="SKBN - Bebas Narkoba (PDF/JPG/PNG, maks. 5 MB)"
-                  existingFileName={existingSkbnName}
-                  existingUrl={existingSkbnUrl}
-                  helpText="Surat Keterangan Bebas Narkoba resmi dari klinik/RS/BNN."
-                />
 
-                {/* 4. BERKAS PENDIDIKAN & KELUARGA: IJAZAH & KK */}
-                <DocumentFileInput
-                  name="ijazah"
-                  label="Ijazah Terakhir (PDF/JPG/PNG, maks. 5 MB)"
-                  existingFileName={existingIjazahName}
-                  existingUrl={existingIjazahUrl}
-                  helpText="Ijazah pendidikan terakhir Mitra."
-                />
-                <DocumentFileInput
-                  name="kartuKeluarga"
-                  label="Kartu Keluarga (PDF/JPG/PNG, maks. 5 MB)"
-                  existingFileName={existingKkName}
-                  existingUrl={existingKkUrl}
-                  helpText="Kartu Keluarga asli atau fotokopi jelas."
-                />
-                {isDriverPosition && (
-                  <DocumentFileInput
-                    name="hasilTesMengemudi"
-                    label="Hasil Tes Mengemudi (PDF/JPG/PNG, maks. 5 MB)"
-                    existingFileName={existingDrivingTestName}
-                    existingUrl={existingDrivingTestUrl}
-                    helpText="Wajib khusus untuk OS002 Driver Delivery & Pickup dan OS005 Driver Ondemand."
-                  />
-                )}
-
-                {/* 5. DOKUMEN TAMBAHAN LAINNYA */}
+                {/* DOKUMEN TAMBAHAN */}
                 <div className="md:col-span-2">
                   <DocumentFileInput
                     name="documents"
@@ -1571,6 +1562,7 @@ function emptyCandidate(): CandidateDraft {
     name: "",
     nik: "",
     fotoKtp: null,
+    fotoSeluruhBadan: null,
     jenisSim: "",
     noSim: "",
     fotoSim: null,
@@ -1796,11 +1788,15 @@ function CandidateFields({
   candidate,
   index,
   update,
+  position,
 }: {
   candidate: CandidateDraft;
   index: number;
   update: (index: number, field: keyof CandidateDraft, value: string | File | null) => void;
+  position?: string | null;
 }) {
+  const showSimFields = !position || needsSim(position);
+  const simRequired = Boolean(position) && needsSim(position);
   return (
     <fieldset className="grid gap-4 rounded-md border p-4 md:grid-cols-2">
       <legend className="px-1 text-sm font-medium">Data kandidat {index + 1}</legend>
@@ -1813,18 +1809,20 @@ function CandidateFields({
       <label className="space-y-1 text-sm">Foto KTP (JPG/PNG, maks. 5 MB)<RequiredMark />
         <input className={fieldClass} type="file" accept="image/jpeg,image/png" onChange={(event) => update(index, "fotoKtp", event.target.files?.[0] || null)} required />
       </label>
-      <label className="space-y-1 text-sm">Jenis SIM<RequiredMark />
-        <select className={fieldClass} value={candidate.jenisSim} onChange={(event) => update(index, "jenisSim", event.target.value)} required>
-          <option value="">Pilih jenis SIM</option>
-          {["A", "B1", "B2", "C", "D"].map((kind) => <option key={kind} value={kind}>SIM {kind}</option>)}
-        </select>
-      </label>
-      <label className="space-y-1 text-sm">No. SIM (hanya angka)<RequiredMark />
-        <input className={fieldClass} type="text" inputMode="numeric" value={candidate.noSim} onChange={(event) => update(index, "noSim", event.target.value.replace(/\D/g, ""))} required />
-      </label>
-      <label className="space-y-1 text-sm">Foto SIM (JPG/PNG, maks. 5 MB)<RequiredMark />
-        <input className={fieldClass} type="file" accept="image/jpeg,image/png" onChange={(event) => update(index, "fotoSim", event.target.files?.[0] || null)} required />
-      </label>
+      {showSimFields && <>
+        <label className="space-y-1 text-sm">Jenis SIM{simRequired ? <RequiredMark /> : <OptionalMark />}
+          <select className={fieldClass} value={candidate.jenisSim} onChange={(event) => update(index, "jenisSim", event.target.value)} required={simRequired}>
+            <option value="">Pilih jenis SIM</option>
+            {simTypesForPosition(position).map((kind) => <option key={kind} value={kind}>SIM {kind}</option>)}
+          </select>
+        </label>
+        <label className="space-y-1 text-sm">No. SIM (hanya angka){simRequired ? <RequiredMark /> : <OptionalMark />}
+          <input className={fieldClass} type="text" inputMode="numeric" value={candidate.noSim} onChange={(event) => update(index, "noSim", event.target.value.replace(/\D/g, ""))} required={simRequired} />
+        </label>
+        <label className="space-y-1 text-sm">Foto SIM (JPG/PNG, maks. 5 MB){simRequired ? <RequiredMark /> : <OptionalMark />}
+          <input className={fieldClass} type="file" accept="image/jpeg,image/png" onChange={(event) => update(index, "fotoSim", event.target.files?.[0] || null)} required={simRequired} />
+        </label>
+      </>}
       <label className="space-y-1 text-sm">SKCK (PDF/JPG/PNG, maks. 5 MB)<RequiredMark />
         <input className={fieldClass} type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={(event) => update(index, "skck", event.target.files?.[0] || null)} required />
       </label>
@@ -2176,11 +2174,17 @@ export function VendorEmployeesPage() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-    if (!draft.fotoKtp || !draft.fotoSim || !draft.skck) {
-      setError("Foto KTP, foto SIM, dan SKCK wajib diunggah untuk data karyawan.");
+    if (!draft.fotoKtp || !draft.skck) {
+      setError("Foto KTP dan SKCK wajib diunggah untuk data karyawan.");
       return;
     }
-    if ([draft.fotoKtp, draft.fotoSim, draft.skck].some((file) => file.size > 5 * 1024 * 1024)) {
+    const hasSimData = Boolean(draft.jenisSim || draft.noSim || draft.fotoSim);
+    if (hasSimData && (!draft.jenisSim || !draft.noSim || !draft.fotoSim)) {
+      setError("Jika mengisi data SIM, jenis SIM, nomor, dan foto SIM harus dilengkapi.");
+      return;
+    }
+    const requiredFiles = [draft.fotoKtp, draft.skck, ...(draft.fotoSim ? [draft.fotoSim] : [])];
+    if (requiredFiles.some((file) => file.size > 5 * 1024 * 1024)) {
       setError("Ukuran setiap foto/dokumen maksimal 5 MB.");
       return;
     }
@@ -2195,7 +2199,9 @@ export function VendorEmployeesPage() {
         ...draft,
         domisiliSesuaiKtp: draft.domisiliSesuaiKtp === "SAMA",
         fotoKtp: await readImage(draft.fotoKtp),
-        fotoSim: await readImage(draft.fotoSim),
+        fotoSim: draft.fotoSim ? await readImage(draft.fotoSim) : null,
+        jenisSim: draft.jenisSim || null,
+        noSim: draft.noSim || null,
         skck: await readImage(draft.skck),
       });
       setDraft(emptyCandidate());
@@ -2256,6 +2262,8 @@ export function VendorEmployeesPage() {
       }
       if (fotoSim instanceof File && fotoSim.size > 0) {
         payload.fotoSim = await readImage(fotoSim);
+      } else if (!String(form.get("jenisSim") || "").trim() && !String(form.get("noSim") || "").trim()) {
+        payload.fotoSim = null;
       }
       if (skck instanceof File && skck.size > 0) {
         payload.skck = await readImage(skck);
@@ -2404,12 +2412,13 @@ export function VendorEmployeesPage() {
               <label className="space-y-1 text-sm">NIK KTP (16 digit)<RequiredMark /><input className={fieldClass} name="nik" inputMode="numeric" pattern="[0-9]{16}" maxLength={16} defaultValue={editingEmployee.nik} required /></label>
               <label className="space-y-1 text-sm">Email<RequiredMark /><input className={fieldClass} name="email" type="email" defaultValue={editingEmployee.email} required /></label>
               <label className="space-y-1 text-sm">No. HP<RequiredMark /><input className={fieldClass} name="phone" inputMode="numeric" pattern="08[0-9]{8,12}" defaultValue={editingEmployee.phone} required /></label>
-              <label className="space-y-1 text-sm">Jenis SIM<RequiredMark />
-                <select className={fieldClass} name="jenisSim" defaultValue={editingEmployee.jenisSim} required>
+              <label className="space-y-1 text-sm">Jenis SIM<OptionalMark />
+                <select className={fieldClass} name="jenisSim" defaultValue={editingEmployee.jenisSim || ""}>
+                  <option value="">Tidak ada</option>
                   {["A", "B1", "B2", "C", "D"].map((kind) => <option key={kind} value={kind}>SIM {kind}</option>)}
                 </select>
               </label>
-              <label className="space-y-1 text-sm">Nomor SIM<RequiredMark /><input className={fieldClass} name="noSim" inputMode="numeric" defaultValue={editingEmployee.noSim} required /></label>
+              <label className="space-y-1 text-sm">Nomor SIM<OptionalMark /><input className={fieldClass} name="noSim" inputMode="numeric" defaultValue={editingEmployee.noSim || ""} /></label>
               <label className="space-y-1 text-sm md:col-span-2">
                 Status Karyawan<RequiredMark />
                 <select className={fieldClass} name="status" defaultValue={editingEmployee.status || "ACTIVE"} required>
@@ -2705,27 +2714,35 @@ function VendorCandidateForm({
     if (!window.confirm(`Anda akan submit ${candidates.length} kandidat. Lanjutkan?`)) return;
     setSaving(true);
     try {
-      for (const candidate of candidates.filter((item) => item.source === "NEW")) {
-        if (!candidate.fotoKtp || !candidate.fotoSim || !candidate.skck) {
-          throw new Error("Foto KTP, foto SIM, dan SKCK wajib diunggah untuk setiap kandidat.");
+      for (const candidate of candidates) {
+        if (!candidate.fotoSeluruhBadan || (candidate.source === "NEW" && (!candidate.fotoKtp || !candidate.skck)) || (candidate.source === "NEW" && needsSim(request.posisi) && (!candidate.fotoSim || !candidate.jenisSim || !candidate.noSim))) {
+          throw new Error("Lengkapi Foto Seluruh Badan dan dokumen wajib sesuai posisi untuk setiap kandidat.");
         }
-        if ([candidate.fotoKtp, candidate.fotoSim, candidate.skck].some((file) => file.size > 5 * 1024 * 1024)) {
+        const requiredFiles = [candidate.fotoSeluruhBadan, ...(candidate.source === "NEW" ? [candidate.fotoKtp, candidate.skck, ...(needsSim(request.posisi) ? [candidate.fotoSim] : [])] : [])].filter((file): file is File => Boolean(file));
+        if (requiredFiles.some((file) => file.size > 5 * 1024 * 1024)) {
           throw new Error("Ukuran setiap foto/dokumen maksimal 5 MB.");
         }
-        if (!["application/pdf", "image/jpeg", "image/png"].includes(candidate.skck.type)) {
+        if (candidate.fotoSeluruhBadan.type !== "image/jpeg" && candidate.fotoSeluruhBadan.type !== "image/png") {
+          throw new Error("Foto Seluruh Badan harus berupa JPG atau PNG.");
+        }
+        if (candidate.source === "NEW" && !["application/pdf", "image/jpeg", "image/png"].includes(candidate.skck!.type)) {
           throw new Error("SKCK harus berupa PDF, JPG, atau PNG.");
         }
       }
 
       const payload = await Promise.all(candidates.map(async (candidate) => {
-        if (candidate.source === "EMPLOYEE") return { employeeId: candidate.employeeId };
+        const fotoSeluruhBadan = await readImage(candidate.fotoSeluruhBadan!);
+        if (candidate.source === "EMPLOYEE") return { employeeId: candidate.employeeId, fotoSeluruhBadan };
         return {
+          fotoSeluruhBadan,
           name: candidate.name,
           nik: candidate.nik,
           fotoKtp: await readImage(candidate.fotoKtp!),
-          jenisSim: candidate.jenisSim,
-          noSim: candidate.noSim,
-          fotoSim: await readImage(candidate.fotoSim!),
+          ...(needsSim(request.posisi) ? {
+            jenisSim: candidate.jenisSim,
+            noSim: candidate.noSim,
+            fotoSim: await readImage(candidate.fotoSim!),
+          } : {}),
           skck: await readImage(candidate.skck!),
           phone: candidate.phone,
           email: candidate.email,
@@ -2824,6 +2841,10 @@ function VendorCandidateForm({
                     Isi data baru
                   </label>
                 </div>
+                <label className="block space-y-1 text-sm">
+                  Foto Seluruh Badan (JPG/PNG, maks. 5 MB)<RequiredMark />
+                  <input className={fieldClass} type="file" accept="image/jpeg,image/png" onChange={(event) => updateCandidate(index, "fotoSeluruhBadan", event.target.files?.[0] || null)} required />
+                </label>
                 {candidate.source === "EMPLOYEE" ? (() => {
                   const availableEmployees = employees.data.filter((employee) => (
                     !candidates.some((item, itemIndex) => (
@@ -2895,7 +2916,7 @@ function VendorCandidateForm({
                     </div>
                   );
                 })() : (
-                  <CandidateFields candidate={candidate} index={index} update={updateCandidate} />
+                  <CandidateFields candidate={candidate} index={index} update={updateCandidate} position={request.posisi} />
                 )}
               </fieldset>
               {candidates.length > 1 && request.type !== "PERGANTIAN" && (
@@ -3100,6 +3121,61 @@ function DocumentPreviewTile({
   );
 }
 
+function CandidateDocumentPreviews({
+  candidateId,
+  position,
+  autoLoad = false,
+}: {
+  candidateId: string;
+  position?: string | null;
+  autoLoad?: boolean;
+}) {
+  const [documents, setDocuments] = useState<Pick<OSCandidate, "fotoKtp" | "fotoSeluruhBadan" | "fotoSim" | "skck" | "formInterview" | "hasilTesMengemudi"> | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function loadDocuments() {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/candidate?candidateId=${encodeURIComponent(candidateId)}`);
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Gagal memuat dokumen kandidat.");
+      setDocuments(result);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Gagal memuat dokumen kandidat.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (autoLoad) void loadDocuments();
+  }, [candidateId, autoLoad]);
+
+  if (!documents) {
+    return <div className="space-y-2">
+      <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => void loadDocuments()}>
+        {loading ? "Memuat dokumen..." : "Lihat dokumen"}
+      </Button>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>;
+  }
+
+  const previews = [
+    ...(documents.fotoKtp ? [{ label: "Foto KTP", href: documents.fotoKtp, isImage: !documents.fotoKtp.startsWith("data:application/pdf") }] : []),
+    ...(documents.fotoSeluruhBadan ? [{ label: "Foto Seluruh Badan", href: documents.fotoSeluruhBadan, isImage: true }] : []),
+    ...(documents.formInterview ? [{ label: "Form Interview", href: documents.formInterview, isImage: documents.formInterview.startsWith("data:image/") }] : []),
+    ...(documents.hasilTesMengemudi ? [{ label: "Hasil Tes Mengemudi", href: documents.hasilTesMengemudi, isImage: documents.hasilTesMengemudi.startsWith("data:image/") }] : []),
+    ...(needsSim(position) && documents.fotoSim ? [{ label: "Foto SIM", href: documents.fotoSim, isImage: !documents.fotoSim.startsWith("data:application/pdf") }] : []),
+    ...(documents.skck ? [{ label: "SKCK", href: documents.skck, isImage: documents.skck.startsWith("data:image/") }] : []),
+  ];
+
+  return previews.length > 0
+    ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">{previews.map((preview) => <DocumentPreviewTile key={preview.label} {...preview} />)}</div>
+    : <p className="text-xs text-muted-foreground">Belum ada lampiran dokumen.</p>;
+}
+
 function CandidateAccountDetailDialog({
   request,
   busy,
@@ -3139,10 +3215,6 @@ function CandidateAccountDetailDialog({
       candidate.domisiliAlamat,
     ].filter(Boolean).join(", ") || "-"
     : "Sesuai dengan alamat KTP";
-
-  const hasDocuments = Boolean(
-    candidate.fotoKtp || candidate.fotoSim || candidate.skck || candidate.hasSkbn,
-  );
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !busy) onClose(); }}>
@@ -3232,12 +3304,12 @@ function CandidateAccountDetailDialog({
                 Legalitas &amp; Hasil Seleksi
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2.5 text-xs">
-                <div>
+                {needsSim(candidate.osRequest.posisi) && <div>
                   <span className="text-muted-foreground block text-[11px]">Surat Izin Mengemudi (SIM)</span>
                   <span className="font-medium text-foreground">
                     {[candidate.jenisSim, candidate.noSim].filter(Boolean).join(" · ") || "-"}
                   </span>
-                </div>
+                </div>}
                 {candidate.alasanKeputusan && (
                   <div className="sm:col-span-2">
                     <span className="text-muted-foreground block text-[11px]">Alasan Penerimaan SM</span>
@@ -3252,40 +3324,7 @@ function CandidateAccountDetailDialog({
                 <FileText className="h-4 w-4 text-primary" />
                 Lampiran Dokumen &amp; Identitas
               </div>
-              {hasDocuments ? (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  {candidate.fotoKtp && (
-                    <DocumentPreviewTile
-                      label="Foto KTP"
-                      href={candidate.fotoKtp}
-                      isImage={!candidate.fotoKtp.startsWith("data:application/pdf")}
-                    />
-                  )}
-                  {candidate.fotoSim && (
-                    <DocumentPreviewTile
-                      label="Foto SIM"
-                      href={candidate.fotoSim}
-                      isImage={!candidate.fotoSim.startsWith("data:application/pdf")}
-                    />
-                  )}
-                  {candidate.skck && (
-                    <DocumentPreviewTile
-                      label="SKCK"
-                      href={candidate.skck}
-                      isImage={candidate.skck.startsWith("data:image/")}
-                    />
-                  )}
-                  {candidate.hasSkbn && (
-                    <DocumentPreviewTile
-                      label="SKBN"
-                      href={`/api/candidate/${candidate.id}/skbn`}
-                      isImage={Boolean(candidate.skbnIsImage)}
-                    />
-                  )}
-                </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">Belum ada lampiran dokumen.</p>
-              )}
+              <CandidateDocumentPreviews candidateId={candidate.id} position={candidate.osRequest.posisi} autoLoad />
             </div>
           </div>
         </div>
@@ -4303,14 +4342,14 @@ export function OSRequestPage() {
   const [assigningId, setAssigningId] = useState<string | null>(null);
   const [activeCandidateRequestId, setActiveCandidateRequestId] = useState<string | null>(null);
   const [activeReviewRequestId, setActiveReviewRequestId] = useState<string | null>(null);
-  const [activeSkbnRequestId, setActiveSkbnRequestId] = useState<string | null>(null);
   const [candidateActionId, setCandidateActionId] = useState<string | null>(null);
-  const [uploadingSkbnCandidateId, setUploadingSkbnCandidateId] = useState<string | null>(null);
   const [candidateDecision, setCandidateDecision] = useState<{
     candidateId: string;
     decision: "APPROVED" | "REJECTED";
   } | null>(null);
   const [candidateDecisionReason, setCandidateDecisionReason] = useState("");
+  const [candidateInterviewFile, setCandidateInterviewFile] = useState<File | null>(null);
+  const [candidateDrivingTestFile, setCandidateDrivingTestFile] = useState<File | null>(null);
 
   const needsMitraId = requestType === "PERGANTIAN" || requestType === "PENGURANGAN";
 
@@ -4341,18 +4380,28 @@ export function OSRequestPage() {
       setError("Alasan diterima atau ditolak wajib diisi.");
       return;
     }
+    if (!candidateInterviewFile || (isDriverPosition(activeReviewRequest?.posisi) && !candidateDrivingTestFile)) {
+      setError("Unggah Form Interview dan, untuk OS002/OS005, Hasil Tes Mengemudi.");
+      return;
+    }
     setError(null);
     setCandidateActionId(candidateDecision.candidateId);
     try {
       const result = await sendJson("/api/candidate", "PATCH", {
         ...candidateDecision,
         alasanKeputusan: candidateDecisionReason.trim(),
+        formInterview: await readImage(candidateInterviewFile),
+        ...(isDriverPosition(activeReviewRequest?.posisi) && candidateDrivingTestFile
+          ? { hasilTesMengemudi: await readImage(candidateDrivingTestFile) }
+          : {}),
       });
       requests.reload();
       setCandidateDecision(result.nextCandidateToRejectId
         ? { candidateId: result.nextCandidateToRejectId, decision: "REJECTED" }
         : null);
       setCandidateDecisionReason("");
+      setCandidateInterviewFile(null);
+      setCandidateDrivingTestFile(null);
     } catch (actionError) {
       setError(actionError instanceof Error ? actionError.message : "Gagal memproses kandidat.");
     } finally {
@@ -4364,6 +4413,8 @@ export function OSRequestPage() {
     setError(null);
     setCandidateDecision({ candidateId, decision });
     setCandidateDecisionReason("");
+    setCandidateInterviewFile(null);
+    setCandidateDrivingTestFile(null);
   }
 
   async function requestCandidateAccounts(requestId: string) {
@@ -4379,25 +4430,6 @@ export function OSRequestPage() {
       setError(actionError instanceof Error ? actionError.message : "Gagal mengajukan aktivasi akun.");
     } finally {
       setCandidateActionId(null);
-    }
-  }
-
-  async function uploadCandidateSkbn(candidateId: string, file: File) {
-    setError(null);
-    setUploadingSkbnCandidateId(candidateId);
-    try {
-      if (!["application/pdf", "image/jpeg", "image/png"].includes(file.type)) {
-        throw new Error("SKBN harus berupa PDF, JPG, atau PNG.");
-      }
-      if (file.size === 0 || file.size > 5 * 1024 * 1024) {
-        throw new Error("Ukuran SKBN maksimal 5 MB.");
-      }
-      await sendJson(`/api/candidate/${candidateId}/skbn`, "PUT", { skbn: await readImage(file) });
-      requests.reload();
-    } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : "Gagal mengunggah SKBN.");
-    } finally {
-      setUploadingSkbnCandidateId(null);
     }
   }
 
@@ -4496,11 +4528,6 @@ export function OSRequestPage() {
     && new Date(item.vendorNotifiedAt).getTime() >= Date.now() - 14 * 24 * 60 * 60 * 1000,
   );
   const activeReviewRequest = requests.data.find((item) => item.id === activeReviewRequestId);
-  const activeSkbnRequest = requests.data.find((item) => item.id === activeSkbnRequestId);
-  const activeSkbnSelectedCandidates = activeSkbnRequest?.candidates?.filter(
-    (candidate) => candidate.status === "TERPILIH",
-  ) || [];
-  const activeSkbnHasMissing = activeSkbnSelectedCandidates.some((candidate) => !candidate.hasSkbn);
   const acceptedCandidateCount = activeReviewRequest?.candidates?.filter(
     (candidate) => candidate.status === "TERPILIH" || candidate.status === "ACTIVATED",
   ).length || 0;
@@ -4615,29 +4642,8 @@ export function OSRequestPage() {
                     const candidates = item.candidates || [];
                     const hasUndecided = candidates.some((candidate) => candidate.status === "KANDIDAT");
                     const selected = candidates.filter((candidate) => candidate.status === "TERPILIH");
-                    const hasMissingSkbn = selected.some((candidate) => !candidate.hasSkbn);
                     if (selected.length > 0 && !hasUndecided) {
-                      if (hasMissingSkbn) {
-                        return (
-                          <Button size="sm" onClick={() => setActiveSkbnRequestId(item.id)}>
-                            Unggah SKBN
-                          </Button>
-                        );
-                      }
-                      return (
-                        <div className="flex items-center gap-2">
-                          <Button
-                            size="sm"
-                            disabled={candidateActionId === item.id}
-                            onClick={() => requestCandidateAccounts(item.id)}
-                          >
-                            {candidateActionId === item.id ? "Mengirim..." : "Request akun"}
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => setActiveSkbnRequestId(item.id)}>
-                            Lihat SKBN
-                          </Button>
-                        </div>
-                      );
+                      return <Button size="sm" disabled={candidateActionId === item.id} onClick={() => requestCandidateAccounts(item.id)}>{candidateActionId === item.id ? "Mengirim..." : "Request akun"}</Button>;
                     }
                     return <Button size="sm" variant="outline" disabled>Menunggu Hasil Seleksi</Button>;
                   })()
@@ -5046,7 +5052,7 @@ export function OSRequestPage() {
                 </div>
               ) : session?.user.role === "SM" ? (
                 activeReviewRequest.candidates.map((candidate) => {
-                  const missingFields = getMissingCandidateFields(candidate);
+                  const missingFields = getMissingCandidateFields(candidate, activeReviewRequest?.posisi);
                   return (
                     <div key={candidate.id} className="rounded-lg border p-4">
                       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -5103,6 +5109,14 @@ export function OSRequestPage() {
                               placeholder={candidateDecision.decision === "REJECTED" ? "Tuliskan alasan penolakan kandidat..." : "Tuliskan alasan penerimaan kandidat..."}
                             />
                           </label>
+                          <label className="block space-y-1 text-sm font-medium">
+                            Form Interview (PDF/JPG/PNG, maks. 5 MB)<RequiredMark />
+                            <input className={fieldClass} type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={(event) => setCandidateInterviewFile(event.target.files?.[0] || null)} required />
+                          </label>
+                          {isDriverPosition(activeReviewRequest?.posisi) && <label className="block space-y-1 text-sm font-medium">
+                            Hasil Tes Mengemudi (PDF/JPG/PNG, maks. 5 MB)<RequiredMark />
+                            <input className={fieldClass} type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={(event) => setCandidateDrivingTestFile(event.target.files?.[0] || null)} required />
+                          </label>}
                           <div className="flex justify-end gap-2">
                             <Button type="button" variant="outline" onClick={() => setCandidateDecision(null)}>Batal</Button>
                             <Button type="button" disabled={candidateActionId === candidate.id || !candidateDecisionReason.trim()} onClick={decideCandidate}>
@@ -5111,49 +5125,7 @@ export function OSRequestPage() {
                           </div>
                         </div>
                       )}
-                      <div className="mt-3 flex flex-wrap gap-3">
-                        {candidate.fotoKtp && (
-                          <div className="space-y-1">
-                            <span className="text-[11px] font-medium text-muted-foreground">Foto KTP</span>
-                            <a href={candidate.fotoKtp} target="_blank" rel="noreferrer" className="block">
-                              <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={candidate.fotoKtp} alt={`Foto KTP ${candidate.name}`} />
-                            </a>
-                          </div>
-                        )}
-                        {candidate.fotoSim && (
-                          <div className="space-y-1">
-                            <span className="text-[11px] font-medium text-muted-foreground">Foto SIM</span>
-                            <a href={candidate.fotoSim} target="_blank" rel="noreferrer" className="block">
-                              <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={candidate.fotoSim} alt={`Foto SIM ${candidate.name}`} />
-                            </a>
-                          </div>
-                        )}
-                        {candidate.skck && (
-                          <div className="space-y-1">
-                            <span className="text-[11px] font-medium text-muted-foreground">SKCK</span>
-                            <a href={candidate.skck} target="_blank" rel="noreferrer" className="block">
-                              {candidate.skck.startsWith("data:application/pdf") ? (
-                                <div className="flex h-24 w-24 flex-col items-center justify-center rounded border bg-muted/40 p-2 text-center hover:bg-muted/70 transition">
-                                  <FileText className="h-8 w-8 text-primary" />
-                                  <span className="mt-1 text-[10px] font-medium leading-tight">SKCK (PDF)</span>
-                                </div>
-                              ) : (
-                                <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={candidate.skck} alt={`SKCK ${candidate.name}`} />
-                              )}
-                            </a>
-                          </div>
-                        )}
-                        {candidate.hasSkbn && (
-                          <div className="space-y-1">
-                            <span className="text-[11px] font-medium text-muted-foreground">SKBN</span>
-                            <a href={`/api/candidate/${candidate.id}/skbn`} target="_blank" rel="noreferrer" className="block">
-                              {candidate.skbnIsImage
-                                ? <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={`/api/candidate/${candidate.id}/skbn`} alt={`SKBN ${candidate.name}`} />
-                                : <div className="flex h-24 w-24 flex-col items-center justify-center rounded border bg-muted/40 p-2 text-center hover:bg-muted/70 transition"><FileText className="h-8 w-8 text-primary" /><span className="mt-1 text-[10px] font-medium leading-tight text-primary underline">Lihat SKBN (PDF)</span></div>}
-                            </a>
-                          </div>
-                        )}
-                      </div>
+                      <div className="mt-3"><CandidateDocumentPreviews candidateId={candidate.id} position={activeReviewRequest?.posisi} /></div>
                     </div>
                   );
                 })
@@ -5164,6 +5136,7 @@ export function OSRequestPage() {
                       <div>
                         <p className="font-medium">{candidate.name}</p>
                         <p className="text-xs text-muted-foreground">{candidate.email || "-"}</p>
+                        <div className="mt-2"><CandidateDocumentPreviews candidateId={candidate.id} position={activeReviewRequest?.posisi} /></div>
                       </div>
                       <StatusBadge status={candidate.status} />
                     </div>
@@ -5174,101 +5147,6 @@ export function OSRequestPage() {
           )}
         </DialogContent>
       </Dialog>
-      {session?.user.role === "VENDOR" && (
-        <Dialog
-          open={Boolean(activeSkbnRequestId)}
-          onOpenChange={(open) => { if (!open) setActiveSkbnRequestId(null); }}
-        >
-          <DialogHeader>
-            <DialogTitle>
-              Unggah Dokumen SKBN — {activeSkbnRequest?.posisi || "Request OS"}
-            </DialogTitle>
-            <p className="text-sm text-muted-foreground">
-              Request {activeSkbnRequest?.jumlah || 0} orang · {activeSkbnRequest?.penempatan || "-"}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              SKBN wajib diunggah untuk semua Mitra OS yang diterima sebelum mengajukan aktivasi akun (format: PDF, JPG, PNG, maks. 5 MB).
-            </p>
-          </DialogHeader>
-          <DialogContent className="space-y-4">
-            <FormError error={error} />
-            <div className="space-y-3">
-              {activeSkbnSelectedCandidates.map((candidate) => (
-                <div key={candidate.id} className="rounded-lg border p-3 space-y-2 text-sm">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">{candidate.name}</p>
-                      <p className="text-xs text-muted-foreground">{candidate.email || "-"} · {candidate.phone || "-"}</p>
-                    </div>
-                    {candidate.hasSkbn ? (
-                      <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700 border border-emerald-200">
-                        SKBN Terunggah
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-medium text-amber-700 border border-amber-200">
-                        Belum Diunggah
-                      </span>
-                    )}
-                  </div>
-                  {candidate.hasSkbn && (
-                    <div>
-                      <a
-                        className="text-xs text-primary underline font-medium"
-                        href={`/api/candidate/${candidate.id}/skbn`}
-                        target="_blank"
-                        rel="noreferrer"
-                      >
-                        Lihat dokumen SKBN
-                      </a>
-                    </div>
-                  )}
-                  <label className="block space-y-1">
-                    <span className="text-xs text-muted-foreground">
-                      {uploadingSkbnCandidateId === candidate.id
-                        ? "Mengunggah..."
-                        : candidate.hasSkbn
-                          ? "Ganti dokumen SKBN"
-                          : "Pilih file SKBN"}
-                    </span>
-                    <input
-                      className={fieldClass}
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png"
-                      disabled={uploadingSkbnCandidateId !== null || candidateActionId === activeSkbnRequestId}
-                      onChange={(event) => {
-                        const file = event.target.files?.[0];
-                        event.target.value = "";
-                        if (file) void uploadCandidateSkbn(candidate.id, file);
-                      }}
-                    />
-                  </label>
-                </div>
-              ))}
-            </div>
-            <div className="flex justify-end gap-2 pt-2 border-t">
-              <Button type="button" variant="outline" onClick={() => setActiveSkbnRequestId(null)}>
-                Tutup
-              </Button>
-              <Button
-                type="button"
-                disabled={activeSkbnHasMissing || candidateActionId === activeSkbnRequestId}
-                onClick={async () => {
-                  if (activeSkbnRequestId) {
-                    await requestCandidateAccounts(activeSkbnRequestId);
-                    setActiveSkbnRequestId(null);
-                  }
-                }}
-              >
-                {candidateActionId === activeSkbnRequestId
-                  ? "Mengirim..."
-                  : activeSkbnHasMissing
-                    ? "Lengkapi SKBN untuk request akun"
-                    : "Request akun"}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
       {session?.user.role === "VENDOR" && activeCandidateRequestId && requests.data
         .filter((item) => item.id === activeCandidateRequestId)
         .map((item) => (

@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
             domisiliKecamatan: true,
             domisiliKabKota: true,
             domisiliProvinsi: true,
-            dokumenDeadlineAt: true,
+            skbnDeadlineAt: true,
             fotoKtp: true,
             jenisSim: true,
             noSim: true,
@@ -99,6 +99,13 @@ export async function GET(req: NextRequest) {
 const maxDocumentBytes = 5 * 1024 * 1024;
 const allowedDocumentTypes = new Set(["application/pdf", "image/jpeg", "image/png"]);
 const maxProfileImageBytes = 5 * 1024 * 1024;
+
+function getAllowedSimTypes(position?: string | null) {
+  if (/^OS002\b/.test(position || "")) return ["A"];
+  if (/^OS003\b|^OS004\b/.test(position || "")) return ["C"];
+  if (/^OS005\b/.test(position || "")) return ["B1", "B2"];
+  return [];
+}
 
 export async function PUT(req: NextRequest) {
   try {
@@ -239,6 +246,9 @@ export async function PUT(req: NextRequest) {
       if (!document || typeof document.name !== "string" || typeof document.content !== "string") {
         return NextResponse.json({ error: "Format dokumen tidak valid." }, { status: 400 });
       }
+      if (/^(SKBN|FORM INTERVIEW|HASIL TES MENGEMUDI|FOTO SELURUH BADAN)(?:\.[^.]+)?$/i.test(document.name.trim())) {
+        return NextResponse.json({ error: "Berkas ini hanya dapat dikirim pada tahap dan menu pengunggahan yang ditentukan." }, { status: 400 });
+      }
       const match = document.content.match(/^data:(application\/pdf|image\/jpeg|image\/png);base64,([A-Za-z0-9+/]+={0,2})$/);
       if (!match || !allowedDocumentTypes.has(match[1])) {
         return NextResponse.json({ error: "Dokumen harus berupa PDF, JPG, atau PNG." }, { status: 400 });
@@ -273,13 +283,20 @@ export async function PUT(req: NextRequest) {
     }
     const mitra = await prisma.user.findFirst({
       where: { id: userId, role: "MITRA", ...(session.user.role === "VENDOR" ? { vendorId: session.user.vendorId } : {}) },
-      include: { mitraProfile: { select: { id: true, waktuKerja: true, skck: true } } },
+      include: { mitraProfile: { select: { id: true, waktuKerja: true, skck: true, posisi: true } } },
     });
     if (!mitra) {
       return NextResponse.json({ error: "Mitra tidak ditemukan." }, { status: 404 });
     }
     if ((session.user.role === "VENDOR" || session.user.role === "MITRA") && waktuKerja !== undefined && waktuKerja !== mitra.mitraProfile?.waktuKerja) {
       return NextResponse.json({ error: "Perubahan jadwal shift hanya dapat dilakukan oleh VM atau SM." }, { status: 403 });
+    }
+    const allowedSimTypes = getAllowedSimTypes(mitra.mitraProfile?.posisi);
+    if (allowedSimTypes.length && typeof jenisSim === "string" && jenisSim.trim() && !allowedSimTypes.includes(jenisSim.trim())) {
+      return NextResponse.json({ error: `Jenis SIM untuk posisi ini harus ${allowedSimTypes.join(" atau ")}.` }, { status: 400 });
+    }
+    if (allowedSimTypes.length && typeof noSim === "string" && noSim.trim() && !/^\d+$/.test(noSim.trim())) {
+      return NextResponse.json({ error: "Nomor SIM hanya boleh berisi angka." }, { status: 400 });
     }
     if (!mitra.mitraProfile && !waktuKerja) {
       return NextResponse.json({ error: "Jadwal shift wajib diisi untuk membuat profil Mitra." }, { status: 400 });

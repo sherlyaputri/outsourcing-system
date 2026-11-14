@@ -89,18 +89,17 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: "Data karyawan tidak ditemukan." }, { status: 404 });
     }
 
-    const requiredFields = ["name", "nik", "jenisSim", "noSim", "phone", "email", "alamat", "kelurahan", "kecamatan", "kabKota", "provinsi"];
+    const requiredFields = ["name", "nik", "phone", "email", "alamat", "kelurahan", "kecamatan", "kabKota", "provinsi"];
     if (requiredFields.some((field) => !isNonEmptyString(body[field]))) {
       return NextResponse.json({ error: "Semua data karyawan wajib diisi." }, { status: 400 });
     }
     if (!/^\d{16}$/.test(body.nik.trim())) {
       return NextResponse.json({ error: "NIK KTP harus tepat 16 digit angka." }, { status: 400 });
     }
-    if (!["A", "B1", "B2", "C", "D"].includes(body.jenisSim)) {
-      return NextResponse.json({ error: "Pilih jenis SIM yang tersedia." }, { status: 400 });
-    }
-    if (!/^\d+$/.test(body.noSim.trim())) {
-      return NextResponse.json({ error: "No. SIM hanya boleh berisi angka." }, { status: 400 });
+    const simProvided = Boolean(body.jenisSim || body.noSim || body.fotoSim);
+    const simPhoto = body.fotoSim === undefined ? employee.fotoSim : body.fotoSim;
+    if (simProvided && (!isNonEmptyString(body.jenisSim) || !["A", "B1", "B2", "C", "D"].includes(body.jenisSim) || typeof body.noSim !== "string" || !/^\d+$/.test(body.noSim.trim()) || !isValidImage(simPhoto))) {
+      return NextResponse.json({ error: "Jika data SIM diisi, jenis, nomor, dan foto SIM wajib dilengkapi." }, { status: 400 });
     }
     if (!/^08\d{8,12}$/.test(body.phone.trim())) {
       return NextResponse.json({ error: "No. HP harus berformat 08xxxxxxxxxxxx." }, { status: 400 });
@@ -112,7 +111,7 @@ export async function PATCH(req: NextRequest) {
     if (body.fotoKtp !== undefined && !isValidImage(body.fotoKtp)) {
       return NextResponse.json({ error: "Foto KTP harus berupa JPG/PNG maksimal 5 MB." }, { status: 400 });
     }
-    if (body.fotoSim !== undefined && !isValidImage(body.fotoSim)) {
+    if (body.fotoSim !== undefined && body.fotoSim !== null && !isValidImage(body.fotoSim)) {
       return NextResponse.json({ error: "Foto SIM harus berupa JPG/PNG maksimal 5 MB." }, { status: 400 });
     }
     if (body.status !== undefined && !["ACTIVE", "INACTIVE"].includes(body.status)) {
@@ -155,8 +154,8 @@ export async function PATCH(req: NextRequest) {
       data: {
         name: body.name.trim(),
         nik: body.nik.trim(),
-        jenisSim: body.jenisSim,
-        noSim: body.noSim.trim(),
+        jenisSim: body.jenisSim ? body.jenisSim.trim() : null,
+        noSim: body.noSim ? body.noSim.trim() : null,
         phone: body.phone.trim(),
         email: normalizedEmail,
         alamat: body.alamat.trim(),
@@ -172,7 +171,7 @@ export async function PATCH(req: NextRequest) {
         domisiliProvinsi: body.domisiliSesuaiKtp ? null : body.domisiliProvinsi.trim(),
         ...(body.status ? { status: body.status } : {}),
         ...(body.fotoKtp ? { fotoKtp: body.fotoKtp } : {}),
-        ...(body.fotoSim ? { fotoSim: body.fotoSim } : {}),
+        ...(body.fotoSim === null || (!simProvided && body.fotoSim === undefined) ? { fotoSim: null } : body.fotoSim ? { fotoSim: body.fotoSim } : {}),
         ...(body.skck ? { skck: body.skck } : {}),
       },
     });
@@ -204,8 +203,8 @@ export async function POST(req: NextRequest) {
     if (typeof nik !== "string" || !/^\d{16}$/.test(nik.trim())) {
       return NextResponse.json({ error: "NIK KTP harus tepat 16 digit angka." }, { status: 400 });
     }
-    if (!isValidImage(fotoKtp) || !isValidImage(fotoSim)) {
-      return NextResponse.json({ error: "Foto KTP dan SIM wajib berupa JPG/PNG maksimal 5 MB." }, { status: 400 });
+    if (!isValidImage(fotoKtp)) {
+      return NextResponse.json({ error: "Foto KTP wajib berupa JPG/PNG maksimal 5 MB." }, { status: 400 });
     }
     if (
       typeof skck !== "string" ||
@@ -215,11 +214,9 @@ export async function POST(req: NextRequest) {
     ) {
       return NextResponse.json({ error: "SKCK wajib berupa PDF/JPG/PNG maksimal 5 MB." }, { status: 400 });
     }
-    if (!["A", "B1", "B2", "C", "D"].includes(jenisSim)) {
-      return NextResponse.json({ error: "Pilih jenis SIM yang tersedia." }, { status: 400 });
-    }
-    if (typeof noSim !== "string" || !/^\d+$/.test(noSim.trim())) {
-      return NextResponse.json({ error: "No. SIM hanya boleh berisi angka." }, { status: 400 });
+    const simProvided = Boolean(jenisSim || noSim || fotoSim);
+    if (simProvided && (!isNonEmptyString(jenisSim) || !["A", "B1", "B2", "C", "D"].includes(jenisSim) || typeof noSim !== "string" || !/^\d+$/.test(noSim.trim()) || !isValidImage(fotoSim))) {
+      return NextResponse.json({ error: "Jika data SIM diisi, jenis, nomor, dan foto SIM wajib dilengkapi." }, { status: 400 });
     }
     if (typeof phone !== "string" || !/^08\d{8,12}$/.test(phone.trim())) {
       return NextResponse.json({ error: "No. HP hanya boleh angka dan harus berformat 08xxxxxxxxxxxx." }, { status: 400 });
@@ -239,7 +236,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Alamat domisili yang berbeda dengan KTP wajib dilengkapi." }, { status: 400 });
     }
 
-    const totalImageBytes = [fotoKtp, fotoSim, skck].reduce(
+    const totalImageBytes = [fotoKtp, ...(fotoSim ? [fotoSim] : []), skck].reduce(
       (total, image) => total + Buffer.from(image.split(",")[1], "base64").length,
       0,
     );
@@ -265,9 +262,9 @@ export async function POST(req: NextRequest) {
         name: name.trim(),
         nik: nik.trim(),
         fotoKtp,
-        jenisSim,
-        noSim: noSim.trim(),
-        fotoSim,
+        jenisSim: jenisSim || null,
+        noSim: noSim ? noSim.trim() : null,
+        fotoSim: fotoSim || null,
         skck,
         phone: phone.trim(),
         email: normalizedEmail,

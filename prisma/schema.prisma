@@ -81,6 +81,7 @@ model MitraProfile {
   domisiliKabKota   String?
   domisiliProvinsi  String?
   dokumenDeadlineAt DateTime?
+  skbnDeadlineAt    DateTime?
   noBpjs            String?
   noRekening        String?
   namaBank          String?
@@ -195,6 +196,12 @@ model Candidate {
   kecamatan                 String?
   kabKota                   String?
   provinsi                  String?
+  fotoSeluruhBadan          String?         @db.LongText
+  formInterview             String?         @db.LongText
+  hasilTesMengemudi         String?         @db.LongText
+  // Legacy columns retained so schema sync preserves historical data; unused by the application.
+  discType                  String?
+  discReport                String?         @db.LongText
   domisiliSesuaiKtp         Boolean         @default(true)
   domisiliAlamat            String?         @db.Text
   domisiliKelurahan         String?
@@ -224,9 +231,9 @@ model VendorEmployee {
   name              String
   nik               String
   fotoKtp           String      @db.LongText
-  jenisSim          String
-  noSim             String
-  fotoSim           String      @db.LongText
+  jenisSim          String?
+  noSim             String?
+  fotoSim           String?     @db.LongText
   skck              String?     @db.LongText
   phone             String
   email             String

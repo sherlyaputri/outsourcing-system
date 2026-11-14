@@ -33,11 +33,8 @@ export async function GET(req: NextRequest) {
           email: true,
           phone: true,
           nik: true,
-          fotoKtp: true,
           jenisSim: true,
           noSim: true,
-          fotoSim: true,
-          skck: true,
           alamat: true,
           kelurahan: true,
           kecamatan: true,
@@ -50,7 +47,6 @@ export async function GET(req: NextRequest) {
           domisiliKabKota: true,
           domisiliProvinsi: true,
           status: true,
-          skbn: true,
           alasanKeputusan: true,
           accountRequest: { select: { status: true } },
         }
@@ -59,7 +55,6 @@ export async function GET(req: NextRequest) {
           name: true,
           email: true,
           status: true,
-          skbn: true,
           accountRequest: { select: { status: true } },
         };
 
@@ -81,13 +76,7 @@ export async function GET(req: NextRequest) {
 
     const response = requests.map((request) => ({
       ...request,
-      candidates: request.candidates.map((candidate) => {
-        if ("skbn" in candidate) {
-          const { skbn, ...candidateSummary } = candidate;
-          return { ...candidateSummary, hasSkbn: Boolean(skbn), skbnIsImage: Boolean(skbn && /^data:image\//.test(skbn)) };
-        }
-        return candidate;
-      }),
+      candidates: request.candidates,
     }));
 
     return NextResponse.json(response);

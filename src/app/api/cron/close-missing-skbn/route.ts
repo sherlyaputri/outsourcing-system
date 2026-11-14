@@ -8,11 +8,21 @@ export async function GET(req: NextRequest) {
   if (!secret || req.headers.get("authorization") !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const now = new Date();
+  const firstTransitionDeadline = new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000);
+  await prisma.mitraProfile.updateMany({
+    where: {
+      skbnDeadlineAt: null,
+      user: { is: { role: "MITRA", status: "ACTIVE" } },
+      documents: { none: { name: "SKBN" } },
+    },
+    data: { skbnDeadlineAt: firstTransitionDeadline },
+  });
   const result = await prisma.user.updateMany({
     where: {
       role: "MITRA",
       status: "ACTIVE",
-      mitraProfile: { is: { skbnDeadlineAt: { lte: new Date() }, documents: { none: { name: "SKBN" } } } },
+      mitraProfile: { is: { skbnDeadlineAt: { lte: now }, documents: { none: { name: "SKBN" } } } },
     },
     data: { status: "CLOSED" },
   });

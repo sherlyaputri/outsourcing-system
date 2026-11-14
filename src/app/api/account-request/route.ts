@@ -47,12 +47,8 @@ export async function GET(req: NextRequest) {
       ? {
           id: true,
           nik: true,
-          fotoKtp: true,
           jenisSim: true,
           noSim: true,
-          fotoSim: true,
-          skck: true,
-          skbn: true,
           alamat: true,
           kelurahan: true,
           kecamatan: true,
@@ -88,8 +84,8 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: "desc" },
     });
 
-    const vendorIds = [...new Set(requests.map((request) => request.vendorId).filter((id): id is string => Boolean(id)))];
-    const vendorEmails = [...new Set(requests.filter((request) => request.type === "VENDOR").map((request) => request.email))];
+    const vendorIds = Array.from(new Set(requests.map((request) => request.vendorId).filter((id): id is string => Boolean(id))));
+    const vendorEmails = Array.from(new Set(requests.filter((request) => request.type === "VENDOR").map((request) => request.email)));
     const vendorLookup = [
       ...(vendorIds.length ? [{ id: { in: vendorIds } }] : []),
       ...(vendorEmails.length ? [{ email: { in: vendorEmails } }] : []),
@@ -107,17 +103,6 @@ export async function GET(req: NextRequest) {
           || (request.type === "VENDOR" ? vendorNameByEmail.get(request.email) : null)
           || null,
       };
-      if (request.candidate && "skbn" in request.candidate) {
-        const { skbn, ...candidateSummary } = request.candidate;
-        return {
-          ...requestWithVendor,
-          candidate: {
-            ...candidateSummary,
-            hasSkbn: Boolean(skbn),
-            skbnIsImage: Boolean(skbn && /^data:image\//.test(skbn)),
-          },
-        };
-      }
       return requestWithVendor;
     });
 
@@ -152,12 +137,6 @@ export async function POST(req: NextRequest) {
       });
       if (!osRequest) return 0;
 
-      const selectedCandidates = await tx.candidate.findMany({
-        where: { osRequestId, status: "TERPILIH" },
-        select: { skbn: true },
-      });
-      if (selectedCandidates.some((candidate) => !candidate.skbn)) return -1;
-
       const requested = await tx.accountRequest.updateMany({
         where: {
           requesterId: session.user.id,
@@ -175,9 +154,6 @@ export async function POST(req: NextRequest) {
       return requested.count;
     });
 
-    if (requestedCount === -1) {
-      return NextResponse.json({ error: "SKBN wajib diunggah untuk semua Mitra yang diterima sebelum request akun." }, { status: 409 });
-    }
     if (requestedCount === 0) {
       return NextResponse.json({ error: "Belum ada kandidat yang lolos seleksi dan siap diajukan." }, { status: 409 });
     }
@@ -290,9 +266,7 @@ export async function PATCH(req: NextRequest) {
             throw new CandidateQuotaReachedError();
           }
         }
-        const documentDeadlineAt = accountReq.candidate
-          ? new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
-          : null;
+        const skbnDeadlineAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
 
         const user = userWithEmail
           ? await tx.user.update({
@@ -353,7 +327,7 @@ export async function PATCH(req: NextRequest) {
             domisiliKecamatan: accountReq.candidate.domisiliKecamatan,
             domisiliKabKota: accountReq.candidate.domisiliKabKota,
             domisiliProvinsi: accountReq.candidate.domisiliProvinsi,
-            dokumenDeadlineAt: documentDeadlineAt,
+            skbnDeadlineAt,
             posisi: accountReq.candidate.replacementMitraProfile?.posisi
               || accountReq.candidate.osRequest.posisi,
             penempatan: accountReq.candidate.replacementMitraProfile?.penempatan
@@ -371,28 +345,28 @@ export async function PATCH(req: NextRequest) {
                   ...profileData,
                 },
               });
-          if (accountReq.candidate.skbn) {
-            const skbnMatch = accountReq.candidate.skbn.match(
-              /^data:(application\/pdf|image\/jpeg|image\/png);base64,[A-Za-z0-9+/]+={0,2}$/,
-            );
-            if (!skbnMatch) {
-              throw new Error("Candidate SKBN document has an invalid format");
-            }
-            await tx.mitraDocument.deleteMany({
-              where: { mitraProfileId: mitraProfile.id, name: "SKBN" },
-            });
-            await tx.mitraDocument.create({
-              data: {
-                mitraProfileId: mitraProfile.id,
-                name: "SKBN",
-                mimeType: skbnMatch[1],
-                content: accountReq.candidate.skbn,
-              },
-            });
+          const fullBodyImageMime = accountReq.candidate.fotoSeluruhBadan?.match(/^data:(image\/jpeg|image\/png);base64,/);
+          if (!fullBodyImageMime) throw new Error("Candidate full-body photo has an invalid format");
+          await tx.mitraDocument.deleteMany({ where: { mitraProfileId: mitraProfile.id, name: "Foto Seluruh Badan" } });
+          await tx.mitraDocument.create({ data: {
+            mitraProfileId: mitraProfile.id,
+            name: "Foto Seluruh Badan",
+            mimeType: fullBodyImageMime[1],
+            content: accountReq.candidate.fotoSeluruhBadan || "",
+          } });
+          for (const [name, content] of [
+            ["Form Interview", accountReq.candidate.formInterview],
+            ["Hasil Tes Mengemudi", accountReq.candidate.hasilTesMengemudi],
+          ] as const) {
+            if (!content) continue;
+            const mime = content.match(/^data:(application\/pdf|image\/jpeg|image\/png);base64,/);
+            if (!mime) throw new Error(`${name} document has an invalid format`);
+            await tx.mitraDocument.deleteMany({ where: { mitraProfileId: mitraProfile.id, name } });
+            await tx.mitraDocument.create({ data: { mitraProfileId: mitraProfile.id, name, mimeType: mime[1], content } });
           }
           await tx.candidate.update({
             where: { id: accountReq.candidate.id },
-            data: { status: "ACTIVATED", documentDeadlineAt },
+            data: { status: "ACTIVATED" },
           });
           if (accountReq.candidate.vendorEmployeeId) {
             await tx.vendorEmployee.update({
