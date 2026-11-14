@@ -51,3 +51,14 @@ export function getShiftEndAt(checkIn: Date, shift: string | null | undefined): 
 
   return new Date(endUtc);
 }
+
+export function getEligibleCheckoutAt(checkIn: Date, shift: string | null | undefined): Date | null {
+  const times = getShiftTimes(shift);
+  const scheduledEnd = getShiftEndAt(checkIn, shift);
+  if (!times || !scheduledEnd) return null;
+  const [[startHour, startMinute], [endHour, endMinute]] = times;
+  let durationMinutes = endHour * 60 + endMinute - (startHour * 60 + startMinute);
+  if (durationMinutes <= 0) durationMinutes += 24 * 60;
+  const workedDurationEnd = new Date(checkIn.getTime() + durationMinutes * 60_000);
+  return workedDurationEnd > scheduledEnd ? workedDurationEnd : scheduledEnd;
+}

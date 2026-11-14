@@ -1,0 +1,8 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/close-missing-skbn",
+      "schedule": "0 * * * *"
+    }
+  ]
+}

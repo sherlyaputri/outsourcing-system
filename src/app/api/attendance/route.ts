@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { Prisma } from "@prisma/client";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { getShiftEndAt } from "@/lib/attendance-shift";
+import { getEligibleCheckoutAt } from "@/lib/attendance-shift";
 import { getMitraShift } from "@/lib/mitra-shift";
 import { queryAttendances } from "@/lib/attendance-query";
 
@@ -62,18 +62,18 @@ export async function POST(req: NextRequest) {
       }
 
       const shift = await getMitraShift(session.user.id, session.user.email);
-      const scheduledEnd = getShiftEndAt(existing.checkIn, shift);
-      if (!scheduledEnd) {
+      const eligibleCheckoutAt = getEligibleCheckoutAt(existing.checkIn, shift);
+      if (!eligibleCheckoutAt) {
         return NextResponse.json({ error: "Jadwal shift belum tersedia. Hubungi vendor atau administrator." }, { status: 409 });
       }
       const checkedOutAt = new Date();
-      if (checkedOutAt < scheduledEnd) {
+      if (checkedOutAt < eligibleCheckoutAt) {
         return NextResponse.json({
           error: `Anda belum dapat check-out. Jadwal shift berakhir pukul ${new Intl.DateTimeFormat("id-ID", {
             timeZone: "Asia/Jakarta",
             hour: "2-digit",
             minute: "2-digit",
-          }).format(scheduledEnd)} WIB.`,
+          }).format(eligibleCheckoutAt)} WIB.`,
         }, { status: 400 });
       }
 

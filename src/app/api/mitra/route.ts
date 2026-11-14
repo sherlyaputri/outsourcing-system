@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !["VENDOR", "VM", "SM"].includes(session.user.role)) {
+    if (!session || !["VENDOR", "VM", "SM", "MITRA"].includes(session.user.role)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     if (session.user.role === "VENDOR" && !session.user.vendorId) {
@@ -18,6 +18,8 @@ export async function GET(req: NextRequest) {
     }
 
     let where: any = { role: "MITRA" };
+
+    if (session.user.role === "MITRA") where.id = session.user.id;
 
     if (session.user.role === "VENDOR") {
       where.vendorId = session.user.vendorId;
@@ -101,7 +103,7 @@ const maxProfileImageBytes = 5 * 1024 * 1024;
 export async function PUT(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "VENDOR" || !session.user.vendorId) {
+    if (!session || !(session.user.role === "MITRA" || (session.user.role === "VENDOR" && session.user.vendorId))) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -251,8 +253,11 @@ export async function PUT(req: NextRequest) {
       }
     }
 
+    if (session.user.role === "MITRA" && userId !== session.user.id) {
+      return NextResponse.json({ error: "Anda hanya dapat mengubah data profil sendiri." }, { status: 403 });
+    }
     const mitra = await prisma.user.findFirst({
-      where: { id: userId, vendorId: session.user.vendorId, role: "MITRA" },
+      where: { id: userId, role: "MITRA", ...(session.user.role === "VENDOR" ? { vendorId: session.user.vendorId } : {}) },
       include: { mitraProfile: { select: { id: true, waktuKerja: true, skck: true } } },
     });
     if (!mitra) {
@@ -312,7 +317,7 @@ export async function PUT(req: NextRequest) {
         where: { userId },
         create: {
           userId,
-          vendorId: session.user.vendorId!,
+          vendorId: session.user.vendorId || mitra.vendorId!,
           ...profileFields,
           waktuKerja: waktuKerja!,
         },

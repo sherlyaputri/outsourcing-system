@@ -46,6 +46,7 @@ function getNavItems(role: string): NavItem[] {
     case "MITRA":
       return [
         dashboardItem,
+        { label: "Profil Saya", href: "/dashboard/profil", icon: <UserCheck size={20} /> },
         { label: "Absensi", href: "/dashboard/absensi", icon: <Camera size={20} /> },
         { label: "Riwayat Absensi", href: "/dashboard/riwayat-absensi", icon: <History size={20} /> },
       ];

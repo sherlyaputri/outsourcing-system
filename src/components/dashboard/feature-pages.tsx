@@ -652,6 +652,25 @@ export function MitraManagementPage() {
   );
 }
 
+export function MitraProfilePage() {
+  const mitras = useApiData<Mitra[]>("/api/mitra", []);
+  const [editing, setEditing] = useState(false);
+  const mitra = mitras.data[0];
+  return (
+    <FeaturePage title="Profil Saya" description="Perbarui data pribadi dan dokumen Anda." roles={["MITRA"]}>
+      <Card><CardContent className="space-y-4 p-6">
+        <LoadingError loading={mitras.loading} error={mitras.error} empty={!mitra} />
+        {mitra && <>
+          <div><h2 className="text-lg font-semibold">{mitra.name}</h2><p className="text-sm text-muted-foreground">{mitra.email}</p></div>
+          <p className="text-sm">Shift: {mitra.mitraProfile?.waktuKerja || "Belum diatur"}</p>
+          <Button onClick={() => setEditing(true)}><Edit className="mr-2 h-4 w-4" />Edit data saya</Button>
+        </>}
+      </CardContent></Card>
+      {editing && mitra && <MitraEditDialog mitra={mitra} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); mitras.reload(); }} />}
+    </FeaturePage>
+  );
+}
+
 function CredentialDialog({
   title,
   name,

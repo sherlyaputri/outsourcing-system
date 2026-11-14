@@ -6,7 +6,7 @@ import DashboardShell from "@/components/dashboard/dashboard-shell";
 import type { DashboardStats } from "@/components/dashboard/dashboard-shell";
 import { StatCard } from "@/components/ui/stat-card";
 import { Card, CardContent } from "@/components/ui/card";
-import { getShiftEndAt } from "@/lib/attendance-shift";
+import { getEligibleCheckoutAt } from "@/lib/attendance-shift";
 
 export default function MitraDashboardPage() {
   const [now, setNow] = useState(() => new Date());
@@ -61,7 +61,7 @@ export default function MitraDashboardPage() {
                   </p>
                 ) : (
                   (() => {
-                    const checkOutAt = getShiftEndAt(
+                    const checkOutAt = getEligibleCheckoutAt(
                       new Date(stats.absensiHariIni.checkIn!),
                       stats.waktuKerja,
                     );
