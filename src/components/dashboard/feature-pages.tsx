@@ -93,8 +93,6 @@ interface OSCandidate {
   kecamatan?: string | null;
   kabKota?: string | null;
   provinsi?: string | null;
-  discType?: string | null;
-  discReport?: string | null;
   domisiliSesuaiKtp?: boolean;
   domisiliAlamat?: string | null;
   domisiliKelurahan?: string | null;
@@ -161,8 +159,6 @@ interface AccountRequest {
     domisiliKecamatan?: string | null;
     domisiliKabKota?: string | null;
     domisiliProvinsi?: string | null;
-    discType?: string | null;
-    discReport?: string | null;
     alasanKeputusan?: string | null;
     osRequest: { id: string; type: string; jumlah: number; posisi?: string | null; penempatan?: string | null; waktuKerja?: string | null };
   } | null;
@@ -189,8 +185,6 @@ interface CandidateDraft {
   domisiliKecamatan: string;
   domisiliKabKota: string;
   domisiliProvinsi: string;
-  discType: string;
-  discReport: File | null;
 }
 
 interface VendorEmployee {
@@ -525,6 +519,7 @@ export function MitraManagementPage() {
   const [editingMitra, setEditingMitra] = useState<Mitra | null>(null);
   const [detailMitra, setDetailMitra] = useState<Mitra | null>(null);
   const [credentialMitra, setCredentialMitra] = useState<Mitra | null>(null);
+  const [shiftMitra, setShiftMitra] = useState<Mitra | null>(null);
   return (
     <FeaturePage title="Data Mitra OS" description="Daftar mitra OS dan ID yang digunakan untuk request pergantian atau pengurangan." roles={["VENDOR", "VM", "SM"]}>
       <Card><CardContent className="p-0">
@@ -534,7 +529,7 @@ export function MitraManagementPage() {
             pageSize={DEFAULT_PAGE_SIZE}
             headers={[
               "ID Mitra OS", "Nama", "Email", "Vendor", "Posisi", "Penempatan", "Shift",
-              ...(session?.user.role === "VENDOR" || session?.user.role === "VM" ? ["Kredensial Awal"] : []),
+              ...(session?.user.role === "VENDOR" ? ["Kredensial Awal"] : []),
               ...(session?.user.role === "VENDOR" || session?.user.role === "VM" ? ["Dokumen Tambahan"] : []),
               "Detail Data", "Status",
             ]}
@@ -549,7 +544,7 @@ export function MitraManagementPage() {
                 <TableCell>{mitra.mitraProfile?.posisi || "-"}</TableCell>
                 <TableCell>{mitra.mitraProfile?.penempatan || "-"}</TableCell>
                 <TableCell>{mitra.mitraProfile?.waktuKerja || "Belum diatur"}</TableCell>
-                {(session?.user.role === "VENDOR" || session?.user.role === "VM") && (
+                {session?.user.role === "VENDOR" && (
                   <TableCell>
                     {mitra.initialPassword ? (
                       <Button
@@ -606,6 +601,11 @@ export function MitraManagementPage() {
                         Edit data
                       </Button>
                     )}
+                    {(session?.user.role === "VM" || session?.user.role === "SM") && (
+                      <Button size="sm" variant="ghost" className="text-xs h-6 px-2" onClick={() => setShiftMitra(mitra)}>
+                        <Edit className="mr-1 h-3 w-3" />Ubah shift
+                      </Button>
+                    )}
                   </div>
                 </TableCell>
                 <TableCell><StatusBadge status={mitra.status} /></TableCell>
@@ -624,6 +624,7 @@ export function MitraManagementPage() {
           }}
         />
       )}
+      {shiftMitra && <MitraShiftDialog mitra={shiftMitra} onClose={() => setShiftMitra(null)} onSaved={() => { setShiftMitra(null); mitras.reload(); }} />}
       {detailMitra && (
         <MitraDetailDialog
           mitra={detailMitra}
@@ -650,6 +651,42 @@ export function MitraManagementPage() {
       )}
     </FeaturePage>
   );
+}
+
+function MitraShiftDialog({ mitra, onClose, onSaved }: { mitra: Mitra; onClose: () => void; onSaved: () => void }) {
+  const [shift, setShift] = useState(mitra.mitraProfile?.waktuKerja || "08:00-17:00");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setError(null);
+    try {
+      await sendJson("/api/mitra", "PUT", { userId: mitra.id, waktuKerja: shift });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Jadwal shift gagal disimpan.");
+    } finally {
+      setSaving(false);
+    }
+  }
+  return <Dialog open onOpenChange={(open) => { if (!open && !saving) onClose(); }}>
+    <DialogContent>
+      <DialogHeader><DialogTitle>Ubah Shift Mitra</DialogTitle></DialogHeader>
+      <form className="space-y-4" onSubmit={submit}>
+        <p className="text-sm text-muted-foreground">{mitra.name}</p>
+        <select className={fieldClass} value={shift} onChange={(event) => setShift(event.target.value)}>
+          <option value="08:00-17:00">08:00–17:00</option>
+          <option value="20:00-05:00">20:00–05:00</option>
+        </select>
+        <FormError error={error} />
+        <DialogFooter>
+          <Button type="button" variant="outline" disabled={saving} onClick={onClose}>Batal</Button>
+          <Button type="submit" disabled={saving}>{saving ? "Menyimpan..." : "Simpan shift"}</Button>
+        </DialogFooter>
+      </form>
+    </DialogContent>
+  </Dialog>;
 }
 
 export function MitraProfilePage() {
@@ -1279,7 +1316,7 @@ function MitraEditDialog({
         name: form.get("name"),
         email: form.get("email"),
         phone: form.get("phone"),
-        waktuKerja: form.get("waktuKerja"),
+        ...(mitra.mitraProfile?.waktuKerja ? { waktuKerja: mitra.mitraProfile.waktuKerja } : {}),
         tempatLahir: form.get("tempatLahir"),
         tanggalLahir: form.get("tanggalLahir"),
         alamat: form.get("alamat"),
@@ -1352,10 +1389,11 @@ function MitraEditDialog({
               <input className={`${fieldClass} cursor-not-allowed bg-muted`} value={mitra.mitraProfile?.penempatan || "-"} readOnly />
             </label>
             <label className="space-y-1 text-sm">Jadwal shift<RequiredMark />
-              <select className={fieldClass} name="waktuKerja" defaultValue={mitra.mitraProfile?.waktuKerja || "08:00-17:00"} required>
+              <select className={fieldClass} name="waktuKerja" defaultValue={mitra.mitraProfile?.waktuKerja || "08:00-17:00"} disabled>
                 <option value="08:00-17:00">08.00–17.00</option>
                 <option value="20:00-05:00">20.00–05.00</option>
               </select>
+              <p className="text-xs text-muted-foreground">Perubahan shift dilakukan oleh VM atau SM.</p>
             </label>
             <label className="space-y-1 text-sm">Jenis SIM<OptionalMark />
               <select className={fieldClass} name="jenisSim" defaultValue={mitra.mitraProfile?.jenisSim || ""}>
@@ -1550,8 +1588,6 @@ function emptyCandidate(): CandidateDraft {
     domisiliKecamatan: "",
     domisiliKabKota: "",
     domisiliProvinsi: "",
-    discType: "",
-    discReport: null,
   };
 }
 
@@ -1760,12 +1796,10 @@ function CandidateFields({
   candidate,
   index,
   update,
-  includeDisc = false,
 }: {
   candidate: CandidateDraft;
   index: number;
   update: (index: number, field: keyof CandidateDraft, value: string | File | null) => void;
-  includeDisc?: boolean;
 }) {
   return (
     <fieldset className="grid gap-4 rounded-md border p-4 md:grid-cols-2">
@@ -1847,19 +1881,6 @@ function CandidateFields({
           </>
         )}
       </fieldset>
-      {includeDisc && (
-        <>
-          <label className="space-y-1 text-sm">Hasil utama DISC<RequiredMark />
-            <select className={fieldClass} value={candidate.discType} onChange={(event) => update(index, "discType", event.target.value)} required>
-              <option value="">Pilih tipe DISC</option>
-              {["D", "I", "S", "C"].map((type) => <option key={type} value={type}>{type}</option>)}
-            </select>
-          </label>
-          <label className="space-y-1 text-sm">Laporan DISC (PDF/JPG/PNG, maks. 5 MB)<RequiredMark />
-            <input className={fieldClass} type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={(event) => update(index, "discReport", event.target.files?.[0] || null)} required />
-          </label>
-        </>
-      )}
     </fieldset>
   );
 }
@@ -2651,17 +2672,6 @@ function VendorCandidateForm({
       setError("Pilih data karyawan untuk setiap kandidat yang menggunakan roster.");
       return;
     }
-    if (candidates.some((candidate) => !candidate.discType || !candidate.discReport)) {
-      setError("Hasil utama dan laporan DISC wajib diisi untuk setiap kandidat.");
-      return;
-    }
-    if (candidates.some((candidate) => candidate.discReport && (
-      candidate.discReport.size > 5 * 1024 * 1024
-      || !["application/pdf", "image/jpeg", "image/png"].includes(candidate.discReport.type)
-    ))) {
-      setError("Laporan DISC harus berupa PDF/JPG/PNG maksimal 5 MB.");
-      return;
-    }
     const selectedEmployeeIds = candidates
       .filter((candidate) => candidate.source === "EMPLOYEE")
       .map((candidate) => candidate.employeeId);
@@ -2708,13 +2718,8 @@ function VendorCandidateForm({
       }
 
       const payload = await Promise.all(candidates.map(async (candidate) => {
-        const discFields = {
-          discType: candidate.discType,
-          discReport: await readImage(candidate.discReport!),
-        };
-        if (candidate.source === "EMPLOYEE") return { employeeId: candidate.employeeId, ...discFields };
+        if (candidate.source === "EMPLOYEE") return { employeeId: candidate.employeeId };
         return {
-          ...discFields,
           name: candidate.name,
           nik: candidate.nik,
           fotoKtp: await readImage(candidate.fotoKtp!),
@@ -2887,21 +2892,10 @@ function VendorCandidateForm({
                           </div>
                         ) : null;
                       })()}
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <label className="space-y-1 text-sm">Hasil utama DISC<RequiredMark />
-                          <select className={fieldClass} value={candidate.discType} onChange={(event) => updateCandidate(index, "discType", event.target.value)} required>
-                            <option value="">Pilih tipe DISC</option>
-                            {["D", "I", "S", "C"].map((type) => <option key={type} value={type}>{type}</option>)}
-                          </select>
-                        </label>
-                        <label className="space-y-1 text-sm">Laporan DISC (PDF/JPG/PNG, maks. 5 MB)<RequiredMark />
-                          <input className={fieldClass} type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={(event) => updateCandidate(index, "discReport", event.target.files?.[0] || null)} required />
-                        </label>
-                      </div>
                     </div>
                   );
                 })() : (
-                  <CandidateFields candidate={candidate} index={index} update={updateCandidate} includeDisc />
+                  <CandidateFields candidate={candidate} index={index} update={updateCandidate} />
                 )}
               </fieldset>
               {candidates.length > 1 && request.type !== "PERGANTIAN" && (
@@ -3147,7 +3141,7 @@ function CandidateAccountDetailDialog({
     : "Sesuai dengan alamat KTP";
 
   const hasDocuments = Boolean(
-    candidate.fotoKtp || candidate.fotoSim || candidate.skck || candidate.hasSkbn || candidate.discReport,
+    candidate.fotoKtp || candidate.fotoSim || candidate.skck || candidate.hasSkbn,
   );
 
   return (
@@ -3244,10 +3238,6 @@ function CandidateAccountDetailDialog({
                     {[candidate.jenisSim, candidate.noSim].filter(Boolean).join(" · ") || "-"}
                   </span>
                 </div>
-                <div>
-                  <span className="text-muted-foreground block text-[11px]">Hasil Utama DISC</span>
-                  <span className="font-medium text-foreground">{candidate.discType || "-"}</span>
-                </div>
                 {candidate.alasanKeputusan && (
                   <div className="sm:col-span-2">
                     <span className="text-muted-foreground block text-[11px]">Alasan Penerimaan SM</span>
@@ -3290,13 +3280,6 @@ function CandidateAccountDetailDialog({
                       label="SKBN"
                       href={`/api/candidate/${candidate.id}/skbn`}
                       isImage={Boolean(candidate.skbnIsImage)}
-                    />
-                  )}
-                  {candidate.discReport && (
-                    <DocumentPreviewTile
-                      label="Laporan DISC"
-                      href={candidate.discReport}
-                      isImage={candidate.discReport.startsWith("data:image/")}
                     />
                   )}
                 </div>
@@ -5084,21 +5067,6 @@ export function OSRequestPage() {
                               ? [candidate.domisiliProvinsi, candidate.domisiliKabKota, candidate.domisiliKecamatan, candidate.domisiliKelurahan, candidate.domisiliAlamat].filter(Boolean).join(", ")
                               : "Sesuai dengan KTP"}
                           </p>
-                          <p className="text-sm">Hasil utama DISC: {candidate.discType || "-"}</p>
-                          {candidate.discType && (
-                            <div className="mt-2 rounded-md bg-muted p-3 text-sm">
-                              <p className="font-medium">Ringkasan DISC — {candidate.name}</p>
-                              <p>{({
-                                D: "Dominance: cenderung tegas, berorientasi pada hasil, dan nyaman mengambil keputusan.",
-                                I: "Influence: cenderung komunikatif, persuasif, dan nyaman berinteraksi dengan orang lain.",
-                                S: "Steadiness: cenderung sabar, konsisten, dan menghargai kestabilan serta kerja sama.",
-                                C: "Compliance: cenderung teliti, analitis, dan memperhatikan prosedur serta standar.",
-                              } as Record<string, string>)[candidate.discType] || "Tipe DISC belum dikenali."}</p>
-                              <p className="mt-1 text-xs text-muted-foreground">
-                                Gambaran umum berdasarkan tipe utama yang dilaporkan; bukan penilaian psikologis lengkap.
-                              </p>
-                            </div>
-                          )}
                           {missingFields.length > 0 && (
                             <p className="text-sm font-medium text-red-600">
                               Data wajib belum lengkap: {missingFields.join(", ")}. Data lain yang opsional tidak perlu dilengkapi.
@@ -5171,21 +5139,6 @@ export function OSRequestPage() {
                                 </div>
                               ) : (
                                 <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={candidate.skck} alt={`SKCK ${candidate.name}`} />
-                              )}
-                            </a>
-                          </div>
-                        )}
-                        {candidate.discReport && (
-                          <div className="space-y-1">
-                            <span className="text-[11px] font-medium text-muted-foreground">Laporan DISC</span>
-                            <a href={candidate.discReport} target="_blank" rel="noreferrer" className="block">
-                              {candidate.discReport.startsWith("data:application/pdf") ? (
-                                <div className="flex h-24 w-24 flex-col items-center justify-center rounded border bg-muted/40 p-2 text-center hover:bg-muted/70 transition">
-                                  <FileText className="h-8 w-8 text-primary" />
-                                  <span className="mt-1 text-[10px] font-medium leading-tight">DISC (PDF)</span>
-                                </div>
-                              ) : (
-                                <img className="h-24 rounded border object-contain hover:opacity-90 transition" src={candidate.discReport} alt={`Laporan DISC ${candidate.name}`} />
                               )}
                             </a>
                           </div>

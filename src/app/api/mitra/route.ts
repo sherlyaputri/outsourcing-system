@@ -86,7 +86,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(mitras.map(({ initialPasswordEncrypted, ...mitra }) => ({
       ...mitra,
-      ...(session.user.role === "VENDOR" || session.user.role === "VM"
+      ...(session.user.role === "VENDOR"
         ? { initialPassword: initialPasswordEncrypted ? decryptInitialPassword(initialPasswordEncrypted) : null }
         : {}),
     })));
@@ -103,11 +103,26 @@ const maxProfileImageBytes = 5 * 1024 * 1024;
 export async function PUT(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !(session.user.role === "MITRA" || (session.user.role === "VENDOR" && session.user.vendorId))) {
+    if (!session || !(session.user.role === "MITRA" || (session.user.role === "VENDOR" && session.user.vendorId) || session.user.role === "VM" || session.user.role === "SM")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const body = await req.json();
+    if (session.user.role === "VM" || session.user.role === "SM") {
+      const { userId: targetId, waktuKerja: shift } = body;
+      if (typeof targetId !== "string" || !supportedShifts.some((item) => item === shift)) {
+        return NextResponse.json({ error: "Mitra atau jadwal shift tidak valid." }, { status: 400 });
+      }
+      const target = await prisma.user.findFirst({ where: { id: targetId, role: "MITRA" }, select: { id: true, vendorId: true } });
+      if (!target) return NextResponse.json({ error: "Mitra tidak ditemukan." }, { status: 404 });
+      if (!target.vendorId) return NextResponse.json({ error: "Akun Mitra belum terhubung ke Vendor." }, { status: 409 });
+      const profile = await prisma.mitraProfile.upsert({
+        where: { userId: targetId },
+        create: { userId: targetId, vendorId: target.vendorId, waktuKerja: shift },
+        update: { waktuKerja: shift },
+      });
+      return NextResponse.json({ userId: profile.userId, waktuKerja: profile.waktuKerja });
+    }
     const {
       userId,
       name,
@@ -262,6 +277,9 @@ export async function PUT(req: NextRequest) {
     });
     if (!mitra) {
       return NextResponse.json({ error: "Mitra tidak ditemukan." }, { status: 404 });
+    }
+    if ((session.user.role === "VENDOR" || session.user.role === "MITRA") && waktuKerja !== undefined && waktuKerja !== mitra.mitraProfile?.waktuKerja) {
+      return NextResponse.json({ error: "Perubahan jadwal shift hanya dapat dilakukan oleh VM atau SM." }, { status: 403 });
     }
     if (!mitra.mitraProfile && !waktuKerja) {
       return NextResponse.json({ error: "Jadwal shift wajib diisi untuk membuat profil Mitra." }, { status: 400 });

@@ -201,8 +201,6 @@ model Candidate {
   domisiliKecamatan         String?
   domisiliKabKota           String?
   domisiliProvinsi          String?
-  discType                  String?
-  discReport                String?         @db.LongText
   acceptedAt                DateTime?
   documentDeadlineAt        DateTime?
   namaBank                  String?

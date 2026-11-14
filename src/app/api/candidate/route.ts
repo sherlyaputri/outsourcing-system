@@ -29,8 +29,6 @@ interface CandidatePayload {
   domisiliKecamatan: string;
   domisiliKabKota: string;
   domisiliProvinsi: string;
-  discType: string;
-  discReport: string;
   vendorEmployeeId: string | null;
   replacementMitraProfileId?: string | null;
 }
@@ -60,7 +58,7 @@ function isCandidatePayload(candidate: Record<string, unknown>): candidate is Re
     "name", "nik", "fotoKtp", "jenisSim", "noSim", "fotoSim", "skck", "phone", "email",
     "alamat", "kelurahan", "kecamatan", "kabKota", "provinsi",
     "domisiliAlamat", "domisiliKelurahan", "domisiliKecamatan", "domisiliKabKota",
-    "domisiliProvinsi", "discType", "discReport",
+    "domisiliProvinsi",
   ].every((field) => typeof candidate[field] === "string")
     && typeof candidate.domisiliSesuaiKtp === "boolean"
     && (candidate.vendorEmployeeId === null || typeof candidate.vendorEmployeeId === "string");
@@ -165,8 +163,6 @@ export async function POST(req: NextRequest) {
         domisiliKecamatan: employee.domisiliKecamatan || "",
         domisiliKabKota: employee.domisiliKabKota || "",
         domisiliProvinsi: employee.domisiliProvinsi || "",
-        discType: candidate.discType,
-        discReport: candidate.discReport,
         vendorEmployeeId: employee.id,
         replacementMitraProfileId,
       };
@@ -201,12 +197,6 @@ export async function POST(req: NextRequest) {
       }
       if (!isValidSkck(candidate.skck)) {
         return NextResponse.json({ error: "SKCK wajib berupa PDF/JPG/PNG maksimal 5 MB." }, { status: 400 });
-      }
-      if (typeof candidate.discType !== "string" || !["D", "I", "S", "C"].includes(candidate.discType)) {
-        return NextResponse.json({ error: "Pilih hasil utama DISC kandidat." }, { status: 400 });
-      }
-      if (!isValidSkck(candidate.discReport)) {
-        return NextResponse.json({ error: "Laporan DISC wajib berupa PDF/JPG/PNG maksimal 5 MB." }, { status: 400 });
       }
       if (typeof candidate.phone !== "string" || !/^08\d{8,12}$/.test(candidate.phone.trim())) {
         return NextResponse.json({ error: "No. HP hanya boleh angka dan harus berformat 08xxxxxxxxxxxx." }, { status: 400 });
@@ -267,8 +257,6 @@ export async function POST(req: NextRequest) {
         domisiliKecamatan: candidate.domisiliSesuaiKtp ? "" : candidate.domisiliKecamatan.trim(),
         domisiliKabKota: candidate.domisiliSesuaiKtp ? "" : candidate.domisiliKabKota.trim(),
         domisiliProvinsi: candidate.domisiliSesuaiKtp ? "" : candidate.domisiliProvinsi.trim(),
-        discType: candidate.discType.trim(),
-        discReport: candidate.discReport,
       });
     }
 
@@ -318,7 +306,6 @@ export async function POST(req: NextRequest) {
       Buffer.from(candidate.fotoKtp.split(",")[1], "base64").length +
       Buffer.from(candidate.fotoSim.split(",")[1], "base64").length
       + Buffer.from(candidate.skck.split(",")[1], "base64").length
-      + Buffer.from(candidate.discReport.split(",")[1], "base64").length
     ), 0);
     if (totalPhotoBytes > 15 * 1024 * 1024) {
       return NextResponse.json({ error: "Total ukuran foto per pengiriman maksimal 15 MB." }, { status: 400 });
@@ -384,8 +371,6 @@ export async function POST(req: NextRequest) {
             domisiliKecamatan: candidate.domisiliKecamatan || null,
             domisiliKabKota: candidate.domisiliKabKota || null,
             domisiliProvinsi: candidate.domisiliProvinsi || null,
-            discType: candidate.discType,
-            discReport: candidate.discReport,
             vendorEmployeeId: candidate.vendorEmployeeId,
             replacementMitraProfileId: candidate.replacementMitraProfileId || null,
           },
@@ -460,8 +445,6 @@ export async function PATCH(req: NextRequest) {
           domisiliKecamatan: true,
           domisiliKabKota: true,
           domisiliProvinsi: true,
-          discType: true,
-          discReport: true,
           osRequest: { select: { jumlah: true } },
         },
       });

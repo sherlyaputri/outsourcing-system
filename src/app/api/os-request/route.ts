@@ -49,8 +49,6 @@ export async function GET(req: NextRequest) {
           domisiliKecamatan: true,
           domisiliKabKota: true,
           domisiliProvinsi: true,
-          discType: true,
-          discReport: true,
           status: true,
           skbn: true,
           alasanKeputusan: true,
