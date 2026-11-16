@@ -108,6 +108,7 @@ export default function Sidebar({ role, userName, vendorName }: SidebarProps) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [notificationCounts, setNotificationCounts] = React.useState<Record<string, number>>({});
+  const [notificationMessages, setNotificationMessages] = React.useState<Record<string, string[]>>({});
   const navItems = getNavItems(role);
 
   React.useEffect(() => {
@@ -116,8 +117,11 @@ export default function Sidebar({ role, userName, vendorName }: SidebarProps) {
       try {
         const response = await fetch("/api/notifications");
         if (!response.ok) throw new Error(`Notification API returned ${response.status}`);
-        const counts = await response.json() as Record<string, number>;
-        if (active) setNotificationCounts(counts);
+        const result = await response.json() as { counts?: Record<string, number>; messages?: Record<string, string[]> } & Record<string, number>;
+        if (active) {
+          setNotificationCounts(result.counts || result);
+          setNotificationMessages(result.messages || {});
+        }
       } catch (error) {
         console.error("Sidebar notifications error:", error);
       }
@@ -176,28 +180,27 @@ export default function Sidebar({ role, userName, vendorName }: SidebarProps) {
         {/* Navigation */}
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={() => setMobileOpen(false)}
-              className={cn(
-                "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors",
-                pathname === item.href
-                  ? "bg-primary text-white"
-                  : "text-gray-700 hover:bg-muted"
-              )}
-            >
-              {item.icon}
-              <span className="flex-1">{item.label}</span>
-              {(notificationCounts[item.href] || 0) > 0 && (
-                <span
-                  aria-label={`${notificationCounts[item.href]} aksi atau pemberitahuan`}
-                  className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-[11px] font-bold leading-none text-white"
-                >
-                  {notificationCounts[item.href]}
-                </span>
-              )}
-            </Link>
+            <div key={item.href}>
+              <Link
+                href={item.href}
+                onClick={() => setMobileOpen(false)}
+                className={cn(
+                  "flex items-center gap-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors",
+                  pathname === item.href ? "bg-primary text-white" : "text-gray-700 hover:bg-muted"
+                )}
+              >
+                {item.icon}
+                <span className="flex-1">{item.label}</span>
+                {(notificationCounts[item.href] || 0) > 0 && (
+                  <span aria-label={`${notificationCounts[item.href]} aksi atau pemberitahuan`} className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-[11px] font-bold leading-none text-white">
+                    {notificationCounts[item.href]}
+                  </span>
+                )}
+              </Link>
+              {notificationMessages[item.href]?.map((message) => (
+                <p key={message} className="mx-3 my-1 rounded bg-amber-50 px-2 py-1.5 text-xs leading-relaxed text-amber-900">{message}</p>
+              ))}
+            </div>
           ))}
         </nav>
 

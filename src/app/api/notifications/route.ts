@@ -11,6 +11,7 @@ export async function GET() {
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const counts: Record<string, number> = {};
+    const messages: Record<string, string[]> = {};
     if (session.user.role === "MITRA") {
       const startOfToday = new Date();
       startOfToday.setHours(0, 0, 0, 0);
@@ -36,7 +37,7 @@ export async function GET() {
       });
       counts["/dashboard/absensi"] = todayAttendance?.checkIn && todayAttendance.checkOut ? 0 : 1;
     } else if (session.user.role === "VENDOR" && session.user.vendorId) {
-      const [requests, incompleteEmployees, incompleteMitraProfiles, incompleteSkbn] = await Promise.all([
+      const [requests, incompleteEmployees, incompleteMitraProfiles, incompleteSkbn, overdueSkbnProfiles] = await Promise.all([
         prisma.oSRequest.count({
           where: {
             vendorId: session.user.vendorId,
@@ -52,11 +53,25 @@ export async function GET() {
         prisma.mitraProfile.count({
           where: { vendorId: session.user.vendorId, skbnDeadlineAt: { not: null }, documents: { none: { name: "SKBN" } } },
         }),
+        prisma.mitraProfile.findMany({
+          where: {
+            vendorId: session.user.vendorId,
+            skbnDeadlineAt: { lte: new Date() },
+            documents: { none: { name: "SKBN" } },
+            user: { is: { status: "CLOSED" } },
+          },
+          select: { idMitraOs: true, user: { select: { name: true } } },
+        }),
       ]);
       // Count only requests that still need vendor action. Informational notices are displayed separately.
       counts["/dashboard/request-os"] = requests;
       counts["/dashboard/data-karyawan"] = incompleteEmployees;
       counts["/dashboard/mitra"] = incompleteMitraProfiles + incompleteSkbn;
+      if (overdueSkbnProfiles.length) {
+        messages["/dashboard/mitra"] = overdueSkbnProfiles.map((profile) =>
+          `Akun Mitra ${profile.idMitraOs || profile.user.name} ditutup permanen karena SKBN melewati tenggat. Tugaskan Mitra OS pengganti.`,
+        );
+      }
     } else if (session.user.role === "VM") {
       const [accountRequests, pendingVendors, osRequests] = await Promise.all([
         prisma.accountRequest.count({ where: { status: "PENDING" } }),
@@ -78,7 +93,7 @@ export async function GET() {
       });
     }
 
-    return NextResponse.json(counts);
+    return NextResponse.json({ counts, messages });
   } catch (error) {
     console.error("Notifications GET error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });

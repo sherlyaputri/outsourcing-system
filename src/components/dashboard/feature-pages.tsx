@@ -26,6 +26,12 @@ interface Vendor {
   address?: string | null;
   phone?: string | null;
   email?: string | null;
+  npwp?: string | null;
+  picName?: string | null;
+  picPhone?: string | null;
+  bankAccountName?: string | null;
+  bankAccountNumber?: string | null;
+  companyTaxStatus?: string | null;
   initialUsername?: string | null;
   initialPassword?: string | null;
   removalReason?: string | null;
@@ -103,6 +109,7 @@ interface OSCandidate {
   domisiliKabKota?: string | null;
   domisiliProvinsi?: string | null;
   status: string;
+  replacementMitraProfileId?: string | null;
   alasanKeputusan?: string | null;
   accountRequest?: { status: string } | null;
 }
@@ -282,6 +289,7 @@ interface OSRequest {
   vendorId?: string | null;
   vendorNotifiedAt?: string | null;
   createdAt?: string;
+  updatedAt?: string;
   requester?: { name: string; role: string };
   vendor?: { name: string } | null;
   approvals?: OSRequestApproval[];
@@ -2585,7 +2593,15 @@ function VendorCandidateForm({
 }) {
   const employees = useApiData<VendorEmployee[]>("/api/vendor-employee?available=true", []);
   const targetMitras = useApiData<Mitra[]>("/api/mitra", []);
-  const initialCandidateCount = request.type === "PERGANTIAN" ? request.jumlah : 1;
+  const filledReplacementTargets = new Set((request.candidates || [])
+    .filter((candidate) => ["TERPILIH", "ACTIVATED"].includes(candidate.status) && candidate.replacementMitraProfileId)
+    .map((candidate) => candidate.replacementMitraProfileId!));
+  const availableReplacementTargets = (request.mitraTargets || []).filter((id) => !filledReplacementTargets.has(id));
+  const initialCandidateCount = request.type === "PERGANTIAN" ? availableReplacementTargets.length : 1;
+  const vendorEntryDeadline = request.type === "PERGANTIAN"
+    ? new Date(new Date(request.updatedAt || request.createdAt || Date.now()).getTime() + 2 * 60 * 60 * 1000)
+    : null;
+  const vendorEntryExpired = Boolean(vendorEntryDeadline && vendorEntryDeadline.getTime() < Date.now());
   const [candidates, setCandidates] = useState<CandidateSubmissionDraft[]>(
     Array.from({ length: initialCandidateCount }, () => ({
       ...emptyCandidate(),
@@ -2609,8 +2625,12 @@ function VendorCandidateForm({
       setError("Vendor dapat mengirim 1 sampai 10 kandidat untuk setiap request.");
       return;
     }
-    if (request.type === "PERGANTIAN" && candidates.length !== request.jumlah) {
-      setError("Jumlah kandidat harus sama dengan jumlah Mitra OS yang diganti.");
+    if (request.type === "PERGANTIAN" && candidates.length !== availableReplacementTargets.length) {
+      setError("Jumlah kandidat harus sama dengan jumlah Mitra OS yang masih perlu diganti.");
+      return;
+    }
+    if (vendorEntryExpired) {
+      setError("Batas waktu pengisian kandidat pergantian (2 jam) telah berakhir.");
       return;
     }
     if (candidates.some((candidate) => candidate.source === "EMPLOYEE" && !candidate.employeeId)) {
@@ -2725,6 +2745,7 @@ function VendorCandidateForm({
           <p>Wilayah Operasional: <strong>{request.penempatan || "-"}</strong></p>
           <p>Waktu Kerja: <strong>{request.waktuKerja || "-"}</strong></p>
           <p>Kandidat diajukan: <strong>{candidates.length}</strong></p>
+          {vendorEntryDeadline && <p className="text-amber-700 sm:col-span-2">Batas pengisian data: <strong>{vendorEntryDeadline.toLocaleString("id-ID")}</strong> (maksimal 2 jam).</p>}
         </div>
         <form onSubmit={submit} className="space-y-6">
           {candidates.map((candidate, index) => (
@@ -2733,16 +2754,16 @@ function VendorCandidateForm({
                 <legend className="px-1 text-sm font-medium">
                   Kandidat {index + 1}
                   {request.type === "PERGANTIAN" && (() => {
-                    const targetId = request.mitraTargets?.[index];
+                    const targetId = availableReplacementTargets[index];
                     const target = targetMitras.data.find((mitra) => mitra.mitraProfile?.id === targetId);
                     return target ? ` · Mengganti ${target.mitraProfile?.idMitraOs || target.name}` : "";
                   })()}
                 </legend>
                 {request.type === "PERGANTIAN" && targetMitras.data.find(
-                  (mitra) => mitra.mitraProfile?.id === request.mitraTargets?.[index],
+                  (mitra) => mitra.mitraProfile?.id === availableReplacementTargets[index],
                 ) && (() => {
                   const target = targetMitras.data.find(
-                    (mitra) => mitra.mitraProfile?.id === request.mitraTargets?.[index],
+                    (mitra) => mitra.mitraProfile?.id === availableReplacementTargets[index],
                   );
                   return (
                     <div className="mb-3 rounded-md bg-muted p-3 text-sm">
@@ -2886,7 +2907,7 @@ function VendorCandidateForm({
               )}
               <Button type="button" variant="outline" disabled={saving} onClick={onClose}>Tutup</Button>
             </div>
-            <Button type="submit" disabled={saving || candidates.length < 1 || candidates.length > 10}>
+            <Button type="submit" disabled={saving || vendorEntryExpired || candidates.length < 1 || candidates.length > 10}>
               {saving ? "Mengirim..." : "Submit"}
             </Button>
           </div>
@@ -2902,6 +2923,7 @@ export function AccountApprovalPage() {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [detailRequest, setDetailRequest] = useState<AccountRequest | null>(null);
+  const [detailVendor, setDetailVendor] = useState<Vendor | null>(null);
   const [activatedVendorCredentials, setActivatedVendorCredentials] = useState<{ name: string; email: string; password: string } | null>(null);
   const pendingAccounts = requests.data.filter((item) => item.status === "PENDING");
   const pendingVendors = vendors.data.filter((vendor) => vendor.status === "PENDING");
@@ -2950,12 +2972,13 @@ export function AccountApprovalPage() {
         <Card>
           <CardHeader><CardTitle className="text-lg">Vendor OS Menunggu Persetujuan</CardTitle></CardHeader>
           <CardContent className="overflow-x-auto p-0">
-            <DataTable headers={["Nama Vendor", "Email Akun", "Telepon", "Status", "Aksi"]}>
+            <DataTable headers={["Nama Vendor", "Email Akun", "Telepon", "Status", "Detail", "Aksi"]}>
               {pendingVendors.map((vendor) => <TableRow key={vendor.id}>
                 <TableCell className="font-medium">{vendor.name}</TableCell>
                 <TableCell>{vendor.email || "-"}</TableCell>
                 <TableCell>{vendor.phone || "-"}</TableCell>
                 <TableCell><StatusBadge status={vendor.status} /></TableCell>
+                <TableCell><Button size="sm" variant="outline" onClick={() => setDetailVendor(vendor)}><Eye className="mr-1 h-3.5 w-3.5" />Detail</Button></TableCell>
                 <TableCell><Button disabled={busyId === vendor.id || !vendor.email} onClick={() => approveVendor(vendor)}>{busyId === vendor.id ? "Mengaktifkan..." : "Setujui Akun Vendor"}</Button></TableCell>
               </TableRow>)}
             </DataTable>
@@ -3012,6 +3035,24 @@ export function AccountApprovalPage() {
           onDecide={(status) => decide(detailRequest.id, status)}
         />
       )}
+      <Dialog open={Boolean(detailVendor)} onOpenChange={(open) => { if (!open) setDetailVendor(null); }}>
+        <DialogHeader><DialogTitle>Detail Dokumen dan Data Vendor</DialogTitle></DialogHeader>
+        <DialogContent>
+          {detailVendor && <div className="grid gap-3 text-sm sm:grid-cols-2">
+            <p>Nama perusahaan: <strong>{detailVendor.name || "-"}</strong></p>
+            <p>NPWP: <strong>{detailVendor.npwp || "-"}</strong></p>
+            <p>Alamat: <strong>{detailVendor.address || "-"}</strong></p>
+            <p>Status pajak: <strong>{detailVendor.companyTaxStatus === "NON_PKP" ? "Non-PKP" : detailVendor.companyTaxStatus || "-"}</strong></p>
+            <p>Email akun: <strong>{detailVendor.email || "-"}</strong></p>
+            <p>Telepon perusahaan: <strong>{detailVendor.phone || "-"}</strong></p>
+            <p>Nama PIC: <strong>{detailVendor.picName || "-"}</strong></p>
+            <p>Telepon PIC: <strong>{detailVendor.picPhone || "-"}</strong></p>
+            <p>Nama rekening: <strong>{detailVendor.bankAccountName || "-"}</strong></p>
+            <p>Nomor rekening: <strong>{detailVendor.bankAccountNumber || "-"}</strong></p>
+          </div>}
+          <p className="mt-4 text-xs text-muted-foreground">Detail ini menampilkan data perusahaan yang diserahkan saat pendaftaran vendor.</p>
+        </DialogContent>
+      </Dialog>
       <Dialog open={Boolean(activatedVendorCredentials)} onOpenChange={(open) => { if (!open) setActivatedVendorCredentials(null); }}>
         <DialogHeader><DialogTitle>Akun Vendor OS aktif</DialogTitle></DialogHeader>
         <DialogContent>

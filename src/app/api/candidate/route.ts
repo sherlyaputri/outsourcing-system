@@ -153,18 +153,27 @@ export async function POST(req: NextRequest) {
         vendorId,
         status: "VENDOR_SELECTED",
       },
-      select: { id: true, jumlah: true, type: true, posisi: true, mitraTargets: true },
+      select: { id: true, jumlah: true, type: true, posisi: true, mitraTargets: true, updatedAt: true, candidates: { select: { replacementMitraProfileId: true, status: true } } },
     });
 
     if (!osRequest) {
       return NextResponse.json({ error: "Request tidak ditemukan atau tidak dapat menerima kandidat." }, { status: 404 });
     }
-    const replacementTargetIds = Array.isArray(osRequest.mitraTargets)
+    if (osRequest.type === "PERGANTIAN" && Date.now() - osRequest.updatedAt.getTime() > 2 * 60 * 60 * 1000) {
+      return NextResponse.json({ error: "Batas waktu pengisian kandidat pergantian (2 jam) telah berakhir." }, { status: 409 });
+    }
+    const allReplacementTargetIds = Array.isArray(osRequest.mitraTargets)
       ? osRequest.mitraTargets.filter((id): id is string => typeof id === "string")
       : [];
+    const filledReplacementTargetIds = new Set(osRequest.candidates
+      .filter((candidate) => ["TERPILIH", "ACTIVATED"].includes(candidate.status) && candidate.replacementMitraProfileId)
+      .map((candidate) => candidate.replacementMitraProfileId!));
+    const replacementTargetIds = osRequest.type === "PERGANTIAN"
+      ? allReplacementTargetIds.filter((id) => !filledReplacementTargetIds.has(id))
+      : allReplacementTargetIds;
     if (osRequest.type === "PERGANTIAN" && (
-      candidateEntries.length !== osRequest.jumlah
-      || replacementTargetIds.length !== osRequest.jumlah
+      candidateEntries.length !== replacementTargetIds.length
+      || allReplacementTargetIds.length !== osRequest.jumlah
     )) {
       return NextResponse.json({
         error: "Untuk pergantian, jumlah kandidat harus sama dengan jumlah Mitra OS yang dipilih.",
@@ -228,8 +237,10 @@ export async function POST(req: NextRequest) {
       };
     });
 
-    const existingCandidates = await prisma.candidate.count({ where: { osRequestId } });
-    if (existingCandidates > 0) {
+    const existingCandidates = await prisma.candidate.findMany({ where: { osRequestId }, select: { status: true } });
+    if (existingCandidates.length > 0 && (
+      osRequest.type !== "PERGANTIAN" || existingCandidates.some((candidate) => candidate.status === "KANDIDAT")
+    )) {
       return NextResponse.json({ error: "Data kandidat untuk request ini sudah pernah dikirim." }, { status: 409 });
     }
 
@@ -521,7 +532,7 @@ export async function PATCH(req: NextRequest) {
           domisiliKecamatan: true,
           domisiliKabKota: true,
           domisiliProvinsi: true,
-          osRequest: { select: { jumlah: true, posisi: true } },
+          osRequest: { select: { jumlah: true, posisi: true, type: true } },
         },
       });
       if (!candidate) return null;
@@ -594,11 +605,14 @@ export async function PATCH(req: NextRequest) {
       });
       if (undecidedCandidates.length === 0) {
         const selectedCount = await tx.candidate.count({
-          where: { osRequestId: candidate.osRequestId, status: "TERPILIH" },
+          where: { osRequestId: candidate.osRequestId, status: { in: ["TERPILIH", "ACTIVATED"] } },
         });
+        const replacementRequest = candidate.osRequest.type === "PERGANTIAN";
         await tx.oSRequest.update({
           where: { id: candidate.osRequestId },
-          data: { status: selectedCount > 0 ? "WAITING_VENDOR_REQUEST" : "NOT_SELECTED" },
+          data: { status: replacementRequest && selectedCount < candidate.osRequest.jumlah
+            ? "VENDOR_SELECTED"
+            : selectedCount > 0 ? "WAITING_VENDOR_REQUEST" : "NOT_SELECTED" },
         });
       } else {
         await tx.oSRequest.updateMany({

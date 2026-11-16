@@ -55,6 +55,7 @@ export async function GET(req: NextRequest) {
           name: true,
           email: true,
           status: true,
+          replacementMitraProfileId: true,
           accountRequest: { select: { status: true } },
         };
 
