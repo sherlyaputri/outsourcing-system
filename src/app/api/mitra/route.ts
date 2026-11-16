@@ -31,6 +31,16 @@ export async function GET(req: NextRequest) {
       where.vendorId = vendorId;
     }
 
+    const transitionNow = new Date();
+    await prisma.mitraProfile.updateMany({
+      where: {
+        skbnDeadlineAt: null,
+        user: { is: { ...where, status: "ACTIVE" } },
+        documents: { none: { name: "SKBN" } },
+      },
+      data: { skbnDeadlineAt: new Date(transitionNow.getTime() + 14 * 24 * 60 * 60 * 1000) },
+    });
+
     const mitras = await prisma.user.findMany({
       where,
       select: {

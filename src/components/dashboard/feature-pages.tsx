@@ -537,7 +537,6 @@ export function MitraManagementPage() {
   const [detailMitra, setDetailMitra] = useState<Mitra | null>(null);
   const [credentialMitra, setCredentialMitra] = useState<Mitra | null>(null);
   const [shiftMitra, setShiftMitra] = useState<Mitra | null>(null);
-  const [skbnMitra, setSkbnMitra] = useState<Mitra | null>(null);
   return (
     <FeaturePage title="Data Mitra OS" description="Daftar mitra OS dan ID yang digunakan untuk request pergantian atau pengurangan." roles={["VENDOR", "VM", "SM"]}>
       <Card><CardContent className="p-0">
@@ -548,7 +547,7 @@ export function MitraManagementPage() {
             headers={[
               "ID Mitra OS", "Nama", "Email", "Vendor", "Posisi", "Penempatan", "Shift",
               ...(session?.user.role === "VENDOR" ? ["Kredensial Awal"] : []),
-              ...(session?.user.role === "VENDOR" || session?.user.role === "VM" ? ["SKBN"] : []),
+              ...(session?.user.role === "VENDOR" || session?.user.role === "VM" ? ["Batas Waktu Dokumen Tambahan"] : []),
               "Detail Data", "Status",
             ]}
           >
@@ -582,8 +581,14 @@ export function MitraManagementPage() {
                 {(session?.user.role === "VENDOR" || session?.user.role === "VM") && (
                   <TableCell>
                     <div className="min-w-32 text-xs">
-                      <p>{mitra.mitraProfile?.documents?.some((document) => document.name === "SKBN") ? "Sudah diunggah" : "Belum diunggah"}</p>
-                      <p className="text-muted-foreground">Tenggat: {mitra.mitraProfile?.skbnDeadlineAt ? new Date(mitra.mitraProfile.skbnDeadlineAt).toLocaleDateString("id-ID") : "Menunggu penetapan"}</p>
+                      {mitra.mitraProfile && ["ACTIVE", "CLOSED"].includes(mitra.status)
+                        ? mitra.mitraProfile.documents?.some((document) => document.name === "SKBN")
+                          ? <p>SKBN sudah diunggah</p>
+                          : <>
+                            <p className="font-medium text-amber-700">SKBN belum diunggah</p>
+                            {mitra.mitraProfile.skbnDeadlineAt && <p className="text-muted-foreground">Batas waktu: {new Date(mitra.mitraProfile.skbnDeadlineAt).toLocaleDateString("id-ID")}</p>}
+                          </>
+                        : <p className="text-muted-foreground">-</p>}
                     </div>
                   </TableCell>
                 )}
@@ -614,7 +619,6 @@ export function MitraManagementPage() {
                         <Edit className="mr-1 h-3 w-3" />Ubah shift
                       </Button>
                     )}
-                    {session?.user.role === "VENDOR" && mitra.mitraProfile && ["ACTIVE", "CLOSED"].includes(mitra.status) && <Button size="sm" variant="ghost" className="text-xs h-6 px-2" onClick={() => setSkbnMitra(mitra)}>Unggah SKBN</Button>}
                   </div>
                 </TableCell>
                 <TableCell><StatusBadge status={mitra.status} /></TableCell>
@@ -634,7 +638,6 @@ export function MitraManagementPage() {
         />
       )}
       {shiftMitra && <MitraShiftDialog mitra={shiftMitra} onClose={() => setShiftMitra(null)} onSaved={() => { setShiftMitra(null); mitras.reload(); }} />}
-      {skbnMitra && <Dialog open onOpenChange={(open) => { if (!open) setSkbnMitra(null); }}><DialogContent><DialogHeader><DialogTitle>SKBN — {skbnMitra.name}</DialogTitle></DialogHeader><MitraSkbnUpload userId={skbnMitra.id} onUploaded={() => mitras.reload()} /></DialogContent></Dialog>}
       {detailMitra && (
         <MitraDetailDialog
           mitra={detailMitra}
@@ -713,66 +716,9 @@ export function MitraProfilePage() {
           <Button onClick={() => setEditing(true)}><Edit className="mr-2 h-4 w-4" />Edit data saya</Button>
         </>}
       </CardContent></Card>
-      {mitra?.mitraProfile && <MitraSkbnUpload />}
       {editing && mitra && <MitraEditDialog mitra={mitra} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); mitras.reload(); }} />}
     </FeaturePage>
   );
-}
-
-function MitraSkbnUpload({ userId, onUploaded }: { userId?: string; onUploaded?: () => void }) {
-  const [status, setStatus] = useState<{ deadline: string | null; uploaded: boolean } | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const url = userId ? `/api/mitra/skbn?userId=${encodeURIComponent(userId)}` : "/api/mitra/skbn";
-  useEffect(() => {
-    let active = true;
-    fetch(url).then(async (response) => {
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Status SKBN gagal dimuat.");
-      return result as { deadline: string | null; uploaded: boolean };
-    }).then((result) => { if (active) setStatus(result); }).catch((loadError) => {
-      if (active) setError(loadError instanceof Error ? loadError.message : "Status SKBN gagal dimuat.");
-    }).finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [url]);
-
-  async function upload(file: File) {
-    setError(null);
-    if (!["application/pdf", "image/jpeg", "image/png"].includes(file.type) || file.size === 0 || file.size > 5 * 1024 * 1024) {
-      setError("SKBN harus berupa PDF/JPG/PNG maksimal 5 MB.");
-      return;
-    }
-    setUploading(true);
-    try {
-      await sendJson("/api/mitra/skbn", "PUT", { ...(userId ? { userId } : {}), skbn: await readImage(file) });
-      const response = await fetch(url);
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || "Status SKBN gagal dimuat.");
-      setStatus(result);
-      onUploaded?.();
-    } catch (uploadError) {
-      setError(uploadError instanceof Error ? uploadError.message : "SKBN gagal diunggah.");
-    } finally {
-      setUploading(false);
-    }
-  }
-
-  const content = <div className="space-y-3">
-    <p className="text-sm">{loading ? "Memuat status SKBN..." : status?.uploaded ? "SKBN sudah diserahkan." : "SKBN wajib diserahkan maksimal 14 hari setelah aktivasi akun."}</p>
-    {status?.deadline && <p className="text-xs text-muted-foreground">Tenggat: {new Date(status.deadline).toLocaleDateString("id-ID")}</p>}
-    <label className="block space-y-1 text-sm">
-      <span>{status?.uploaded ? "Ganti dokumen SKBN" : "Unggah SKBN (PDF/JPG/PNG, maksimal 5 MB)"}</span>
-      <input className={fieldClass} type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" disabled={uploading || loading} onChange={(event) => {
-        const file = event.target.files?.[0];
-        event.target.value = "";
-        if (file) void upload(file);
-      }} />
-    </label>
-    {uploading && <p className="text-xs text-muted-foreground">Mengunggah SKBN...</p>}
-    <FormError error={error} />
-  </div>;
-  return userId ? content : <Card><CardHeader><CardTitle className="text-lg">Dokumen SKBN</CardTitle></CardHeader><CardContent>{content}</CardContent></Card>;
 }
 
 function CredentialDialog({
@@ -1300,8 +1246,12 @@ function MitraEditDialog({
 
   const existingSkckUrl = profile?.skck || null;
   const existingSkckName = existingSkckUrl ? "Dokumen SKCK (Tersimpan)" : null;
-
-  const otherDocs = profile?.documents?.filter((d) => !["Foto Seluruh Badan", "Form Interview", "Hasil Tes Mengemudi"].includes(d.name)) || [];
+  const skbnDocument = profile?.documents?.find((document) => document.name === "SKBN");
+  const existingSkbnName = skbnDocument ? "Dokumen SKBN (Tersimpan)" : null;
+  const existingSkbnUrl = skbnDocument ? `/api/mitra/${mitra.id}/documents/${skbnDocument.id}` : null;
+  const skbnDeadlineHelp = profile?.skbnDeadlineAt
+    ? `Unggah maksimal 14 hari setelah aktivasi. Batas waktu: ${new Date(profile.skbnDeadlineAt).toLocaleDateString("id-ID")}.`
+    : "Unggah maksimal 14 hari setelah akun Mitra aktif.";
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1309,29 +1259,22 @@ function MitraEditDialog({
     setSaving(true);
     const form = new FormData(event.currentTarget);
     try {
-      const files = form.getAll("documents").filter((file): file is File => file instanceof File && file.size > 0);
-      for (const file of files) {
-        if (!["application/pdf", "image/jpeg", "image/png"].includes(file.type)) {
-          throw new Error("Dokumen harus berupa PDF, JPG, atau PNG.");
-        }
-        if (file.size > 5 * 1024 * 1024) {
-          throw new Error("Ukuran setiap dokumen maksimal 5 MB.");
-        }
-      }
-
-      const documents = await Promise.all(files.map(async (file) => ({
-        name: file.name,
-        content: await readImage(file),
-      })));
       const fotoKtp = form.get("fotoKtp");
       const fotoSim = form.get("fotoSim");
       const fotoSelfie = form.get("fotoProfil");
       const skck = form.get("skck");
+      const skbn = form.get("skbn");
       if (skck instanceof File && skck.size > 5 * 1024 * 1024) {
         throw new Error("Ukuran SKCK maksimal 5 MB.");
       }
       if (skck instanceof File && skck.size > 0 && !["application/pdf", "image/jpeg", "image/png"].includes(skck.type)) {
         throw new Error("SKCK harus berupa PDF, JPG, atau PNG.");
+      }
+      if (skbn instanceof File && skbn.size > 5 * 1024 * 1024) {
+        throw new Error("Ukuran SKBN maksimal 5 MB.");
+      }
+      if (skbn instanceof File && skbn.size > 0 && !["application/pdf", "image/jpeg", "image/png"].includes(skbn.type)) {
+        throw new Error("SKBN harus berupa PDF, JPG, atau PNG.");
       }
       if (fotoSelfie instanceof File && fotoSelfie.size > 5 * 1024 * 1024) {
         throw new Error("Ukuran Foto Profil maksimal 5 MB.");
@@ -1366,12 +1309,14 @@ function MitraEditDialog({
         namaBank: form.get("namaBank"),
         jenisSim: form.get("jenisSim"),
         noSim: form.get("noSim"),
-        documents,
         ...(selfiePayload ? { fotoProfil: selfiePayload } : {}),
         ...(skck instanceof File && skck.size > 0 ? { skck: await readImage(skck) } : {}),
         ...(fotoKtp instanceof File && fotoKtp.size > 0 ? { fotoKtp: await readImage(fotoKtp) } : {}),
         ...(fotoSim instanceof File && fotoSim.size > 0 ? { fotoSim: await readImage(fotoSim) } : {}),
       });
+      if (skbn instanceof File && skbn.size > 0) {
+        await sendJson("/api/mitra/skbn", "PUT", { userId: mitra.id, skbn: await readImage(skbn) });
+      }
       onSaved();
     } catch (submitError) {
       setError(submitError instanceof Error ? submitError.message : "Gagal menyimpan data Mitra.");
@@ -1512,40 +1457,16 @@ function MitraEditDialog({
                   existingUrl={existingSkckUrl}
                   helpText="Surat Keterangan Catatan Kepolisian yang masih berlaku."
                 />
-
-                {/* DOKUMEN TAMBAHAN */}
-                <div className="md:col-span-2">
-                  <DocumentFileInput
-                    name="documents"
-                    label="Dokumen Tambahan Lainnya (Sertifikat / Berkas Pendukung)"
-                    multiple
-                    existingFileName={otherDocs.length > 0 ? `${otherDocs.length} berkas tambahan sudah tersimpan` : null}
-                    helpText="Pilih berkas pendukung lainnya jika ada (PDF/JPG/PNG, maks. 5 MB per file)."
-                  />
-                </div>
+                {profile && ["ACTIVE", "CLOSED"].includes(mitra.status) && <DocumentFileInput
+                  name="skbn"
+                  label="SKBN (PDF/JPG/PNG, maks. 5 MB)"
+                  existingFileName={existingSkbnName}
+                  existingUrl={existingSkbnUrl}
+                  helpText={skbnDeadlineHelp}
+                />}
               </div>
             </div>
           </div>
-          {otherDocs.length > 0 && (
-            <div className="space-y-1.5 text-xs bg-muted/30 p-3 rounded-lg border">
-              <p className="font-semibold text-foreground">Dokumen tambahan lain yang tersimpan:</p>
-              <div className="flex flex-wrap gap-2">
-                {otherDocs.map((document) => (
-                  <a
-                    key={document.id}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-background border text-primary hover:underline text-xs"
-                    href={`/api/mitra/${mitra.id}/documents/${document.id}`}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    <FileText className="h-3.5 w-3.5" />
-                    {document.name}
-                    <ExternalLink className="h-3 w-3 text-muted-foreground" />
-                  </a>
-                ))}
-              </div>
-            </div>
-          )}
           <FormError error={error} />
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" disabled={saving} onClick={onClose}>Batal</Button>
@@ -1789,11 +1710,13 @@ function CandidateFields({
   index,
   update,
   position,
+  includeBodyPhoto = false,
 }: {
   candidate: CandidateDraft;
   index: number;
   update: (index: number, field: keyof CandidateDraft, value: string | File | null) => void;
   position?: string | null;
+  includeBodyPhoto?: boolean;
 }) {
   const showSimFields = !position || needsSim(position);
   const simRequired = Boolean(position) && needsSim(position);
@@ -1803,27 +1726,40 @@ function CandidateFields({
       <label className="space-y-1 text-sm">Nama Mitra<RequiredMark />
         <input className={fieldClass} value={candidate.name} onChange={(event) => update(index, "name", event.target.value)} required />
       </label>
-      <label className="space-y-1 text-sm">NIK KTP (16 digit angka)<RequiredMark />
+      {includeBodyPhoto && <label className="space-y-1 text-sm">Foto Seluruh Badan (JPG/PNG, maks. 5 MB)<RequiredMark />
+        <input className={fieldClass} type="file" accept="image/jpeg,image/png" onChange={(event) => update(index, "fotoSeluruhBadan", event.target.files?.[0] || null)} required />
+      </label>}
+      {!includeBodyPhoto && <label className="space-y-1 text-sm">NIK KTP (16 digit angka)<RequiredMark />
         <input className={fieldClass} type="text" inputMode="numeric" pattern="[0-9]{16}" maxLength={16} value={candidate.nik} onChange={(event) => update(index, "nik", event.target.value.replace(/\D/g, "").slice(0, 16))} required />
-      </label>
-      <label className="space-y-1 text-sm">Foto KTP (JPG/PNG, maks. 5 MB)<RequiredMark />
+      </label>}
+      <label className="space-y-1 text-sm">Upload KTP (JPG/PNG, maks. 5 MB)<RequiredMark />
         <input className={fieldClass} type="file" accept="image/jpeg,image/png" onChange={(event) => update(index, "fotoKtp", event.target.files?.[0] || null)} required />
       </label>
+      {includeBodyPhoto && <label className="space-y-1 text-sm">NIK KTP (16 digit angka)<RequiredMark />
+        <input className={fieldClass} type="text" inputMode="numeric" pattern="[0-9]{16}" maxLength={16} value={candidate.nik} onChange={(event) => update(index, "nik", event.target.value.replace(/\D/g, "").slice(0, 16))} required />
+      </label>}
       {showSimFields && <>
-        <label className="space-y-1 text-sm">Jenis SIM{simRequired ? <RequiredMark /> : <OptionalMark />}
-          <select className={fieldClass} value={candidate.jenisSim} onChange={(event) => update(index, "jenisSim", event.target.value)} required={simRequired}>
-            <option value="">Pilih jenis SIM</option>
-            {simTypesForPosition(position).map((kind) => <option key={kind} value={kind}>SIM {kind}</option>)}
-          </select>
+        <label className="space-y-1 text-sm">Upload SIM (JPG/PNG, maks. 5 MB){simRequired ? <RequiredMark /> : <OptionalMark />}
+          <input className={fieldClass} type="file" accept="image/jpeg,image/png" onChange={(event) => update(index, "fotoSim", event.target.files?.[0] || null)} required={simRequired} />
         </label>
-        <label className="space-y-1 text-sm">No. SIM (hanya angka){simRequired ? <RequiredMark /> : <OptionalMark />}
-          <input className={fieldClass} type="text" inputMode="numeric" value={candidate.noSim} onChange={(event) => update(index, "noSim", event.target.value.replace(/\D/g, ""))} required={simRequired} />
-        </label>
+        <div className="space-y-2">
+          <label className="block space-y-1 text-sm">Jenis SIM{simRequired ? <RequiredMark /> : <OptionalMark />}
+            <select className={fieldClass} value={candidate.jenisSim} onChange={(event) => update(index, "jenisSim", event.target.value)} required={simRequired}>
+              <option value="">Pilih jenis SIM</option>
+              {simTypesForPosition(position).map((kind) => <option key={kind} value={kind}>SIM {kind}</option>)}
+            </select>
+          </label>
+          <label className="block space-y-1 text-sm">No. SIM (hanya angka){simRequired ? <RequiredMark /> : <OptionalMark />}
+            <input className={fieldClass} type="text" inputMode="numeric" value={candidate.noSim} onChange={(event) => update(index, "noSim", event.target.value.replace(/\D/g, ""))} required={simRequired} />
+          </label>
+        </div>
+      </>}
+      {!includeBodyPhoto && showSimFields && <>
         <label className="space-y-1 text-sm">Foto SIM (JPG/PNG, maks. 5 MB){simRequired ? <RequiredMark /> : <OptionalMark />}
           <input className={fieldClass} type="file" accept="image/jpeg,image/png" onChange={(event) => update(index, "fotoSim", event.target.files?.[0] || null)} required={simRequired} />
         </label>
       </>}
-      <label className="space-y-1 text-sm">SKCK (PDF/JPG/PNG, maks. 5 MB)<RequiredMark />
+      <label className="space-y-1 text-sm md:col-span-2">SKCK (PDF/JPG/PNG, maks. 5 MB)<RequiredMark />
         <input className={fieldClass} type="file" accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/jpeg,image/png" onChange={(event) => update(index, "skck", event.target.files?.[0] || null)} required />
       </label>
       <label className="space-y-1 text-sm">No. HP (hanya angka: 08xxxxxxxxxxxx)<RequiredMark />
@@ -2841,10 +2777,6 @@ function VendorCandidateForm({
                     Isi data baru
                   </label>
                 </div>
-                <label className="block space-y-1 text-sm">
-                  Foto Seluruh Badan (JPG/PNG, maks. 5 MB)<RequiredMark />
-                  <input className={fieldClass} type="file" accept="image/jpeg,image/png" onChange={(event) => updateCandidate(index, "fotoSeluruhBadan", event.target.files?.[0] || null)} required />
-                </label>
                 {candidate.source === "EMPLOYEE" ? (() => {
                   const availableEmployees = employees.data.filter((employee) => (
                     !candidates.some((item, itemIndex) => (
@@ -2913,10 +2845,14 @@ function VendorCandidateForm({
                           </div>
                         ) : null;
                       })()}
+                      <label className="block space-y-1 text-sm">
+                        Foto Seluruh Badan (JPG/PNG, maks. 5 MB)<RequiredMark />
+                        <input className={fieldClass} type="file" accept="image/jpeg,image/png" onChange={(event) => updateCandidate(index, "fotoSeluruhBadan", event.target.files?.[0] || null)} required />
+                      </label>
                     </div>
                   );
                 })() : (
-                  <CandidateFields candidate={candidate} index={index} update={updateCandidate} position={request.posisi} />
+                  <CandidateFields candidate={candidate} index={index} update={updateCandidate} position={request.posisi} includeBodyPhoto />
                 )}
               </fieldset>
               {candidates.length > 1 && request.type !== "PERGANTIAN" && (
