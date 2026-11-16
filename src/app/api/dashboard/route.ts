@@ -56,11 +56,8 @@ export async function GET() {
     } else if (role === "VM") {
       const totalVendor = await prisma.vendor.count({ where: { status: "ACTIVE" } });
       const totalMitra = await prisma.user.count({ where: { role: "MITRA", status: "ACTIVE" } });
-      const [pendingAccountRequests, pendingVendors] = await Promise.all([
-        prisma.accountRequest.count({ where: { status: "PENDING" } }),
-        prisma.vendor.count({ where: { status: "PENDING" } }),
-      ]);
-      const pendingApprovals = pendingAccountRequests + pendingVendors;
+      const pendingAccountRequests = await prisma.accountRequest.count({ where: { status: "PENDING", type: "MITRA" } });
+      const pendingApprovals = pendingAccountRequests;
       const pendingRequests = await prisma.oSRequest.count({
         where: { status: { in: ["APPROVED_COO", "VENDOR_SELECTED"] } },
       });

@@ -63,6 +63,31 @@ export async function GET() {
   }
 }
 
+export async function POST(req: NextRequest) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session || session.user.role !== "VM") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const body = await req.json();
+    const name = typeof body.name === "string" ? body.name.trim() : "";
+    const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
+    if (!name || !email || !phone) return NextResponse.json({ error: "Nama vendor, email, dan nomor telepon wajib diisi." }, { status: 400 });
+    if (name.length > 200 || phone.length > 30 || !/^\S+@\S+\.\S+$/.test(email)) {
+      return NextResponse.json({ error: "Data vendor tidak valid." }, { status: 400 });
+    }
+    const [existingUser, existingVendor] = await Promise.all([
+      prisma.user.findUnique({ where: { email }, select: { id: true } }),
+      prisma.vendor.findFirst({ where: { email }, select: { id: true } }),
+    ]);
+    if (existingUser || existingVendor) return NextResponse.json({ error: "Email sudah digunakan." }, { status: 409 });
+    const vendor = await prisma.vendor.create({ data: { name, email, phone, status: "PENDING" } });
+    return NextResponse.json(vendor, { status: 201 });
+  } catch (error) {
+    console.error("Vendor POST error:", error);
+    return NextResponse.json({ error: "Vendor gagal ditambahkan." }, { status: 500 });
+  }
+}
+
 export async function PATCH(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
@@ -103,24 +128,18 @@ export async function PATCH(req: NextRequest) {
 
     if (!session || session.user.role !== "VM") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    if (action === "APPROVE") {
+    if (action === "GENERATE_CREDENTIALS") {
       if (!vendorId) return NextResponse.json({ error: "Pilih vendor yang akan diaktifkan." }, { status: 400 });
       const vendor = await prisma.vendor.findUnique({ where: { id: vendorId } });
       if (!vendor) return NextResponse.json({ error: "Vendor tidak ditemukan." }, { status: 404 });
-      if (vendor.status !== "PENDING") return NextResponse.json({ error: "Vendor ini tidak sedang menunggu persetujuan." }, { status: 409 });
+      if (vendor.status !== "PENDING") return NextResponse.json({ error: "Kredensial hanya dapat dibuat untuk vendor berstatus menunggu." }, { status: 409 });
       if (!vendor.email) return NextResponse.json({ error: "Email akun vendor belum tersedia." }, { status: 409 });
 
       const existingUser = await prisma.user.findUnique({ where: { email: vendor.email } });
       if (existingUser && (existingUser.role !== "VENDOR" || (existingUser.vendorId && existingUser.vendorId !== vendor.id))) {
         return NextResponse.json({ error: "Email vendor sudah digunakan oleh akun lain." }, { status: 409 });
       }
-      if (existingUser?.status === "ACTIVE") {
-        const updatedVendor = await prisma.$transaction(async (tx) => {
-          await tx.user.update({ where: { id: existingUser.id }, data: { vendorId: vendor.id } });
-          return tx.vendor.update({ where: { id: vendor.id }, data: { status: "ACTIVE" } });
-        });
-        return NextResponse.json({ vendor: updatedVendor, initialPassword: null });
-      }
+      if (existingUser?.status === "ACTIVE") return NextResponse.json({ error: "Email sudah terhubung ke akun aktif." }, { status: 409 });
       const initialPassword = generateInitialPassword();
       const hashedPassword = await bcrypt.hash(initialPassword, 10);
       const initialPasswordEncrypted = encryptInitialPassword(initialPassword);

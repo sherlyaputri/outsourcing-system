@@ -2448,10 +2448,49 @@ export function VendorEmployeesPage() {
 export function VendorManagementPage() {
   const vendors = useApiData<Vendor[]>("/api/vendor", []);
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
-  const [credentialVendor, setCredentialVendor] = useState<Vendor | null>(null);
+  const [detailVendor, setDetailVendor] = useState<Vendor | null>(null);
+  const [showCreateVendor, setShowCreateVendor] = useState(false);
+  const [vendorForm, setVendorForm] = useState({ name: "", email: "", phone: "" });
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  async function createVendor(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setSaving(true);
+    try {
+      await sendJson("/api/vendor", "POST", vendorForm);
+      setVendorForm({ name: "", email: "", phone: "" });
+      setShowCreateVendor(false);
+      vendors.reload();
+    } catch (createError) {
+      setError(createError instanceof Error ? createError.message : "Gagal menambahkan Vendor OS.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function generateVendorCredentials(vendor: Vendor) {
+    setError(null);
+    setSaving(true);
+    try {
+      const result = await sendJson("/api/vendor", "PATCH", { action: "GENERATE_CREDENTIALS", vendorId: vendor.id });
+      const updatedVendor: Vendor = {
+        ...vendor,
+        ...(result.vendor || {}),
+        initialUsername: vendor.email,
+        initialPassword: result.initialPassword,
+        status: "ACTIVE",
+      };
+      setDetailVendor(updatedVendor);
+      vendors.reload();
+    } catch (generateError) {
+      setError(generateError instanceof Error ? generateError.message : "Gagal membuat kredensial Vendor.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function removeVendor(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2482,38 +2521,27 @@ export function VendorManagementPage() {
       description="Daftar vendor OS dan status kerja sama."
       roles={["VM"]}
     >
+      <div className="flex justify-end">
+        <Button onClick={() => { setError(null); setShowCreateVendor(true); }}>+ Tambah Vendor OS</Button>
+      </div>
       <Card><CardContent className="overflow-x-auto p-0">
         <FormError error={error} />
         <LoadingError loading={vendors.loading} error={vendors.error} empty={!vendors.data.length} />
         {!vendors.loading && !vendors.error && vendors.data.length > 0 && (
-          <DataTable headers={["Nama Vendor", "Email", "Telepon", "Jumlah Mitra OS", "Kredensial Awal", "Status", "Alasan Remove", "Aksi"]}>
+          <div className="hidden md:block">
+          <DataTable headers={["Nama Vendor", "Email", "Telepon", "Jumlah Mitra OS", "Status", "Aksi"]}>
             {vendors.data.map((vendor) => (
               <TableRow key={vendor.id}>
                 <TableCell className="font-medium">{vendor.name}</TableCell>
                 <TableCell>{vendor.email || "-"}</TableCell>
                 <TableCell>{vendor.phone || "-"}</TableCell>
                 <TableCell>{vendor._count?.users || 0}</TableCell>
-                <TableCell>
-                  {vendor.initialPassword ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="text-primary hover:text-primary hover:bg-primary/10 flex items-center gap-1.5 text-xs h-7 px-2.5 font-medium"
-                      onClick={() => setCredentialVendor(vendor)}
-                    >
-                      <KeyRound className="h-3.5 w-3.5" />
-                      Lihat
-                    </Button>
-                  ) : (
-                    <span className="text-xs text-muted-foreground">
-                      {vendor.status === "PENDING" ? "Menunggu persetujuan" : "Tidak tersedia"}
-                    </span>
-                  )}
-                </TableCell>
                 <TableCell><StatusBadge status={vendor.status} /></TableCell>
-                <TableCell className="max-w-64 whitespace-normal">{vendor.removalReason || "-"}</TableCell>
                 <TableCell>
-                  {vendor.status === "ACTIVE" ? (
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" variant="outline" onClick={() => setDetailVendor(vendor)}>Detail</Button>
+                    {vendor.status === "PENDING" && <Button size="sm" className="bg-blue-600 hover:bg-blue-700" disabled={saving} onClick={() => generateVendorCredentials(vendor)}>Generate Kredensial</Button>}
+                    {vendor.status === "ACTIVE" ? (
                     <Button size="sm" variant="outline" onClick={() => {
                       setError(null);
                       setSelectedVendor(vendor);
@@ -2521,12 +2549,52 @@ export function VendorManagementPage() {
                       Tandai Tidak Digunakan
                     </Button>
                   ) : vendor.removedAt ? new Date(vendor.removedAt).toLocaleDateString("id-ID") : "-"}
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
           </DataTable>
+          </div>
         )}
+        <div className="space-y-3 p-3 md:hidden">
+          {vendors.data.map((vendor) => <div key={vendor.id} className="rounded-lg border p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0"><p className="truncate font-semibold">{vendor.name}</p><p className="break-all text-sm text-muted-foreground">{vendor.email || "-"}</p><p className="text-sm text-muted-foreground">{vendor.phone || "-"}</p></div>
+              <StatusBadge status={vendor.status} />
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">Mitra OS: {vendor._count?.users || 0}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" onClick={() => setDetailVendor(vendor)}>Detail Vendor</Button>
+              {vendor.status === "PENDING" && <Button size="sm" className="bg-blue-600 hover:bg-blue-700" disabled={saving} onClick={() => generateVendorCredentials(vendor)}>Generate Kredensial</Button>}
+              {vendor.status === "ACTIVE" && <Button size="sm" variant="outline" onClick={() => setSelectedVendor(vendor)}>Tandai Tidak Digunakan</Button>}
+            </div>
+          </div>)}
+        </div>
       </CardContent></Card>
+      {showCreateVendor && <Dialog open onOpenChange={(open) => { if (!open && !saving) setShowCreateVendor(false); }}>
+        <DialogHeader><DialogTitle>Tambah Vendor OS</DialogTitle></DialogHeader>
+        <DialogContent><form onSubmit={createVendor} className="space-y-4">
+          <label className="block space-y-1 text-sm">Nama Vendor<RequiredMark /><input className={fieldClass} value={vendorForm.name} onChange={(event) => setVendorForm({ ...vendorForm, name: event.target.value })} required maxLength={200} /></label>
+          <label className="block space-y-1 text-sm">Email<RequiredMark /><input className={fieldClass} type="email" value={vendorForm.email} onChange={(event) => setVendorForm({ ...vendorForm, email: event.target.value })} required /></label>
+          <label className="block space-y-1 text-sm">No. Telepon<RequiredMark /><input className={fieldClass} type="tel" value={vendorForm.phone} onChange={(event) => setVendorForm({ ...vendorForm, phone: event.target.value })} required maxLength={30} /></label>
+          <FormError error={error} />
+          <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={saving} onClick={() => setShowCreateVendor(false)}>Batal</Button><Button type="submit" disabled={saving}>{saving ? "Menyimpan..." : "Submit"}</Button></div>
+        </form></DialogContent>
+      </Dialog>}
+      {detailVendor && <Dialog open onOpenChange={(open) => { if (!open) setDetailVendor(null); }}>
+        <DialogHeader><DialogTitle>Detail Data Vendor</DialogTitle></DialogHeader>
+        <DialogContent><div className="grid gap-3 text-sm sm:grid-cols-2">
+          <p>Nama Vendor: <strong>{detailVendor.name}</strong></p><p>Status: <StatusBadge status={detailVendor.status} /></p>
+          <p>Email: <strong>{detailVendor.email || "-"}</strong></p><p>No. Telepon: <strong>{detailVendor.phone || "-"}</strong></p>
+          <p>Jumlah Mitra OS: <strong>{detailVendor._count?.users || 0}</strong></p>
+          <p>Alamat: <strong>{detailVendor.address || "-"}</strong></p><p>NPWP: <strong>{detailVendor.npwp || "-"}</strong></p>
+          <p>Nama PIC: <strong>{detailVendor.picName || "-"}</strong></p><p>No. HP PIC: <strong>{detailVendor.picPhone || "-"}</strong></p>
+          <p>Status pajak: <strong>{detailVendor.companyTaxStatus === "NON_PKP" ? "Non-PKP" : detailVendor.companyTaxStatus || "-"}</strong></p>
+          <p>Nama rekening: <strong>{detailVendor.bankAccountName || "-"}</strong></p><p>No. rekening: <strong>{detailVendor.bankAccountNumber || "-"}</strong></p>
+          {detailVendor.removalReason && <p className="sm:col-span-2">Alasan tidak digunakan: <strong>{detailVendor.removalReason}</strong></p>}
+          {detailVendor.initialPassword && <div className="rounded-md border border-blue-200 bg-blue-50 p-4 sm:col-span-2"><h3 className="mb-2 font-semibold">Kredensial Vendor OS</h3><p>Username: <strong>{detailVendor.initialUsername || detailVendor.email}</strong></p><p>Password awal: <code className="break-all">{detailVendor.initialPassword}</code></p><p className="mt-2 text-xs text-muted-foreground">Kredensial tersedia sampai Vendor mengganti password pertamanya.</p></div>}
+        </div></DialogContent>
+      </Dialog>}
       {selectedVendor && (
         <Dialog open onOpenChange={(open) => {
           if (!open && !saving) {
@@ -2565,18 +2633,6 @@ export function VendorManagementPage() {
             </form>
           </DialogContent>
         </Dialog>
-      )}
-      {credentialVendor && credentialVendor.initialPassword && (
-        <CredentialDialog
-          title="Kredensial Awal Vendor OS"
-          name={credentialVendor.name}
-          subtitle={credentialVendor.phone || credentialVendor.email || undefined}
-          status={credentialVendor.status}
-          username={credentialVendor.initialUsername || credentialVendor.email || ""}
-          password={credentialVendor.initialPassword}
-          helperText="Sampaikan kredensial awal ini kepada PIC Vendor OS untuk login pertama kali. Kredensial akan otomatis disembunyikan setelah vendor mengubah password."
-          onClose={() => setCredentialVendor(null)}
-        />
       )}
     </FeaturePage>
   );
@@ -2919,24 +2975,16 @@ function VendorCandidateForm({
 
 export function AccountApprovalPage() {
   const requests = useApiData<AccountRequest[]>("/api/account-request", []);
-  const vendors = useApiData<Vendor[]>("/api/vendor", []);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [detailRequest, setDetailRequest] = useState<AccountRequest | null>(null);
-  const [detailVendor, setDetailVendor] = useState<Vendor | null>(null);
-  const [activatedVendorCredentials, setActivatedVendorCredentials] = useState<{ name: string; email: string; password: string } | null>(null);
-  const pendingAccounts = requests.data.filter((item) => item.status === "PENDING");
-  const pendingVendors = vendors.data.filter((vendor) => vendor.status === "PENDING");
+  const pendingAccounts = requests.data.filter((item) => item.status === "PENDING" && item.type === "MITRA");
 
   async function decide(requestId: string, status: "APPROVED" | "REJECTED") {
     setError(null);
     setBusyId(requestId);
     try {
       const result = await sendJson("/api/account-request", "PATCH", { requestId, status });
-      const request = requests.data.find((item) => item.id === requestId);
-      if (status === "APPROVED" && request?.type === "VENDOR" && result.initialPassword) {
-        setActivatedVendorCredentials({ name: request.vendorName || request.name, email: request.email, password: result.initialPassword });
-      }
       if (detailRequest?.id === requestId) {
         setDetailRequest(null);
       }
@@ -2948,43 +2996,10 @@ export function AccountApprovalPage() {
     }
   }
 
-  async function approveVendor(vendor: Vendor) {
-    setError(null);
-    setBusyId(vendor.id);
-    try {
-      const result = await sendJson("/api/vendor", "PATCH", { action: "APPROVE", vendorId: vendor.id });
-      if (result.initialPassword) {
-        setActivatedVendorCredentials({ name: vendor.name, email: vendor.email || "", password: result.initialPassword });
-      }
-      vendors.reload();
-    } catch (actionError) {
-      setError(actionError instanceof Error ? actionError.message : "Gagal mengaktifkan akun vendor.");
-    } finally {
-      setBusyId(null);
-    }
-  }
-
   return (
-    <FeaturePage title="Aktivasi Akun" description="Aktifkan akun Vendor OS dan Mitra OS yang menunggu persetujuan." roles={["VM"]}>
+    <FeaturePage title="Aktivasi Akun" description="Aktifkan akun Mitra OS yang menunggu persetujuan." roles={["VM"]}>
       <FormError error={error} />
-      <LoadingError loading={requests.loading || vendors.loading} error={requests.error || vendors.error} empty={!pendingAccounts.length && !pendingVendors.length} />
-      {pendingVendors.length > 0 && (
-        <Card>
-          <CardHeader><CardTitle className="text-lg">Vendor OS Menunggu Persetujuan</CardTitle></CardHeader>
-          <CardContent className="overflow-x-auto p-0">
-            <DataTable headers={["Nama Vendor", "Email Akun", "Telepon", "Status", "Detail", "Aksi"]}>
-              {pendingVendors.map((vendor) => <TableRow key={vendor.id}>
-                <TableCell className="font-medium">{vendor.name}</TableCell>
-                <TableCell>{vendor.email || "-"}</TableCell>
-                <TableCell>{vendor.phone || "-"}</TableCell>
-                <TableCell><StatusBadge status={vendor.status} /></TableCell>
-                <TableCell><Button size="sm" variant="outline" onClick={() => setDetailVendor(vendor)}><Eye className="mr-1 h-3.5 w-3.5" />Detail</Button></TableCell>
-                <TableCell><Button disabled={busyId === vendor.id || !vendor.email} onClick={() => approveVendor(vendor)}>{busyId === vendor.id ? "Mengaktifkan..." : "Setujui Akun Vendor"}</Button></TableCell>
-              </TableRow>)}
-            </DataTable>
-          </CardContent>
-        </Card>
-      )}
+      <LoadingError loading={requests.loading} error={requests.error} empty={!pendingAccounts.length} />
       {pendingAccounts.length > 0 && <Card><CardContent className="overflow-x-auto p-0">
         <h2 className="px-4 py-3 text-lg font-semibold">Akun Mitra OS Menunggu Persetujuan</h2>
         <DataTable headers={["Tanggal", "Nama", "Email", "Telepon", "Vendor/Pemohon", "Request OS", "Detail Data", "Status", "Aksi"]}>
@@ -2993,7 +3008,7 @@ export function AccountApprovalPage() {
               <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString("id-ID") : "-"}</TableCell>
               <TableCell>
                 <p className="font-medium">{item.name}</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">Jenis akun: {item.type === "VENDOR" ? "Vendor OS" : "Mitra OS"}</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">Jenis akun: Mitra OS</p>
               </TableCell>
               <TableCell>{item.email}</TableCell>
               <TableCell>{item.phone || "-"}</TableCell>
@@ -3015,9 +3030,7 @@ export function AccountApprovalPage() {
               <TableCell><StatusBadge status={item.status} /></TableCell>
               <TableCell>
                 <div className="flex flex-wrap gap-2">
-                  <Button size="sm" disabled={busyId === item.id} onClick={() => decide(item.id, "APPROVED")}>
-                    {item.type === "VENDOR" ? "Aktifkan Akun Vendor" : "Aktivasi Akun"}
-                  </Button>
+                  <Button size="sm" disabled={busyId === item.id} onClick={() => decide(item.id, "APPROVED")}>Aktivasi Akun</Button>
                   <Button size="sm" variant="outline" disabled={busyId === item.id} onClick={() => decide(item.id, "REJECTED")}>
                     Tolak
                   </Button>
@@ -3035,35 +3048,6 @@ export function AccountApprovalPage() {
           onDecide={(status) => decide(detailRequest.id, status)}
         />
       )}
-      <Dialog open={Boolean(detailVendor)} onOpenChange={(open) => { if (!open) setDetailVendor(null); }}>
-        <DialogHeader><DialogTitle>Detail Dokumen dan Data Vendor</DialogTitle></DialogHeader>
-        <DialogContent>
-          {detailVendor && <div className="grid gap-3 text-sm sm:grid-cols-2">
-            <p>Nama perusahaan: <strong>{detailVendor.name || "-"}</strong></p>
-            <p>NPWP: <strong>{detailVendor.npwp || "-"}</strong></p>
-            <p>Alamat: <strong>{detailVendor.address || "-"}</strong></p>
-            <p>Status pajak: <strong>{detailVendor.companyTaxStatus === "NON_PKP" ? "Non-PKP" : detailVendor.companyTaxStatus || "-"}</strong></p>
-            <p>Email akun: <strong>{detailVendor.email || "-"}</strong></p>
-            <p>Telepon perusahaan: <strong>{detailVendor.phone || "-"}</strong></p>
-            <p>Nama PIC: <strong>{detailVendor.picName || "-"}</strong></p>
-            <p>Telepon PIC: <strong>{detailVendor.picPhone || "-"}</strong></p>
-            <p>Nama rekening: <strong>{detailVendor.bankAccountName || "-"}</strong></p>
-            <p>Nomor rekening: <strong>{detailVendor.bankAccountNumber || "-"}</strong></p>
-          </div>}
-          <p className="mt-4 text-xs text-muted-foreground">Detail ini menampilkan data perusahaan yang diserahkan saat pendaftaran vendor.</p>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={Boolean(activatedVendorCredentials)} onOpenChange={(open) => { if (!open) setActivatedVendorCredentials(null); }}>
-        <DialogHeader><DialogTitle>Akun Vendor OS aktif</DialogTitle></DialogHeader>
-        <DialogContent>
-          {activatedVendorCredentials && <div className="space-y-2 text-sm">
-            <p>Perusahaan: <strong>{activatedVendorCredentials.name}</strong></p>
-            <p>Username: <strong>{activatedVendorCredentials.email}</strong></p>
-            <p>Password awal: <code className="rounded bg-muted px-2 py-1">{activatedVendorCredentials.password}</code></p>
-            <p className="text-xs text-muted-foreground">Simpan kredensial ini dan sampaikan kepada admin vendor. Password awal ditampilkan saat aktivasi.</p>
-          </div>}
-        </DialogContent>
-      </Dialog>
     </FeaturePage>
   );
 }

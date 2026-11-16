@@ -73,12 +73,11 @@ export async function GET() {
         );
       }
     } else if (session.user.role === "VM") {
-      const [accountRequests, pendingVendors, osRequests] = await Promise.all([
-        prisma.accountRequest.count({ where: { status: "PENDING" } }),
-        prisma.vendor.count({ where: { status: "PENDING" } }),
+      const [accountRequests, osRequests] = await Promise.all([
+        prisma.accountRequest.count({ where: { status: "PENDING", type: "MITRA" } }),
         prisma.oSRequest.count({ where: { status: "APPROVED_COO" } }),
       ]);
-      counts["/dashboard/approval-akun"] = accountRequests + pendingVendors;
+      counts["/dashboard/approval-akun"] = accountRequests;
       counts["/dashboard/request-os"] = osRequests;
     } else if (session.user.role === "SM") {
       counts["/dashboard/request-os"] = await prisma.candidate.count({

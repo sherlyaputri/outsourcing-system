@@ -30,6 +30,7 @@ export async function GET(req: NextRequest) {
     }
 
     let where: Prisma.AccountRequestWhereInput = {
+      type: "MITRA",
       status: "PENDING",
       OR: [
         { candidate: null },
@@ -192,6 +193,10 @@ export async function PATCH(req: NextRequest) {
 
     if (!accountReq) {
       return NextResponse.json({ error: "Request tidak ditemukan" }, { status: 404 });
+    }
+
+    if (accountReq.type === "VENDOR") {
+      return NextResponse.json({ error: "Akun Vendor OS dikelola melalui menu Data Vendor." }, { status: 409 });
     }
 
     if (accountReq.status !== "PENDING") {

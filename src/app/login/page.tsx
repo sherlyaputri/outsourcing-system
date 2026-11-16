@@ -3,7 +3,6 @@
 import React, { useState } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -106,10 +105,7 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          <div className="mt-4 text-center text-sm">
-            <span className="text-muted-foreground">Vendor OS baru? </span>
-            <Link href="/register/vendor" className="font-medium text-primary underline">Daftar akun</Link>
-          </div>
+          <p className="mt-4 text-center text-xs text-muted-foreground">Akun Vendor OS baru dibuat oleh VM. Hubungi VM untuk memperoleh akun.</p>
 
           <div className="mt-6 p-4 bg-muted rounded-lg">
             <p className="text-xs font-medium text-muted-foreground mb-2">Akun Demo:</p>
