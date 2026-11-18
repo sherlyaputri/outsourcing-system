@@ -1,3 +1,5 @@
-import { ClaimsPage } from "@/components/dashboard/feature-pages";
+import { redirect } from "next/navigation";
 
-export default ClaimsPage;
+export default function ClaimsRedirectPage() {
+  redirect("/dashboard/invoice");
+}

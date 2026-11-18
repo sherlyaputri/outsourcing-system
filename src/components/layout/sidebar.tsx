@@ -10,7 +10,6 @@ import {
   Building2,
   Users,
   UserCheck,
-  ClipboardList,
   FileText,
   Receipt,
   Camera,
@@ -57,7 +56,6 @@ function getNavItems(role: string): NavItem[] {
         { label: "Data Karyawan", href: "/dashboard/data-karyawan", icon: <Users size={20} /> },
         { label: "Data Mitra OS", href: "/dashboard/mitra", icon: <Users size={20} /> },
         { label: "Riwayat Absensi", href: "/dashboard/riwayat-absensi", icon: <History size={20} /> },
-        { label: "Daftar Klaim", href: "/dashboard/klaim", icon: <ClipboardList size={20} /> },
         { label: "Invoice", href: "/dashboard/invoice", icon: <Receipt size={20} /> },
       ];
     case "VM":
@@ -67,7 +65,6 @@ function getNavItems(role: string): NavItem[] {
         { label: "Approval Akun", href: "/dashboard/approval-akun", icon: <UserCheck size={20} /> },
         { label: "Data Mitra OS", href: "/dashboard/mitra", icon: <Users size={20} /> },
         { label: "Data Absensi", href: "/dashboard/riwayat-absensi", icon: <History size={20} /> },
-        { label: "Daftar Klaim", href: "/dashboard/klaim", icon: <ClipboardList size={20} /> },
         { label: "Daftar Invoice", href: "/dashboard/invoice", icon: <Receipt size={20} /> },
         { label: "Request OS", href: "/dashboard/request-os", icon: <FileText size={20} /> },
       ];

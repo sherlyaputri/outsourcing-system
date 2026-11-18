@@ -17,7 +17,9 @@ export async function GET(req: NextRequest) {
     }
 
     const claims = await prisma.claim.findMany({
-      where,
+      where: session.user.role === "VENDOR"
+        ? { vendorId: session.user.vendorId || "__none__", invoice: { status: { in: ["PUBLISHED", "PAID"] } } }
+        : where,
       select: {
         id: true,
         vendorId: true,
@@ -30,6 +32,7 @@ export async function GET(req: NextRequest) {
         dokumenNama: true,
         createdAt: true,
         vendor: { select: { name: true } },
+        invoiceId: true,
       },
       orderBy: { createdAt: "desc" },
     });
@@ -52,46 +55,25 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { vendorId, bulan, jenisClaim, jumlahMitra, nominal, catatan, dokumen, dokumenNama } = body;
+    const { invoiceId, jenisClaim, nominal, catatan } = body;
 
-    if (!vendorId || !bulan || !jenisClaim || !Number.isInteger(jumlahMitra) || jumlahMitra < 1 ||
-        typeof nominal !== "number" || !Number.isFinite(nominal) || nominal < 0) {
+    if (!invoiceId || typeof jenisClaim !== "string" || !jenisClaim.trim() ||
+        typeof nominal !== "number" || !Number.isFinite(nominal) || nominal <= 0) {
       return NextResponse.json({ error: "Data klaim tidak lengkap atau tidak valid" }, { status: 400 });
     }
 
-    const vendor = await prisma.vendor.findFirst({
-      where: { id: vendorId, status: "ACTIVE" },
-      select: { id: true },
-    });
-
-    if (!vendor) {
-      return NextResponse.json({ error: "Vendor tidak ditemukan atau tidak aktif" }, { status: 400 });
-    }
-
-    if (typeof dokumen !== "string" || typeof dokumenNama !== "string") {
-      return NextResponse.json({ error: "Dokumen klaim wajib diunggah" }, { status: 400 });
-    }
-
-    const fileMatch = dokumen.match(/^data:(application\/pdf|image\/jpeg|image\/png);base64,([A-Za-z0-9+/]+={0,2})$/);
-    if (!fileMatch) {
-      return NextResponse.json({ error: "Dokumen harus berupa PDF, JPG, atau PNG" }, { status: 400 });
-    }
-
-    const fileSize = Buffer.from(fileMatch[2], "base64").length;
-    if (fileSize === 0 || fileSize > 5 * 1024 * 1024) {
-      return NextResponse.json({ error: "Ukuran dokumen maksimal 5 MB" }, { status: 400 });
-    }
+    const invoice = await prisma.invoice.findUnique({ where: { id: String(invoiceId) }, select: { id: true, vendorId: true, bulan: true, status: true } });
+    if (!invoice || invoice.status !== "DRAFT") return NextResponse.json({ error: "Klaim hanya dapat ditambahkan ke invoice Draft." }, { status: 409 });
 
     const claim = await prisma.claim.create({
       data: {
-        vendorId,
-        bulan,
-        jenisClaim,
-        jumlahMitra,
+        vendorId: invoice.vendorId,
+        invoiceId: invoice.id,
+        bulan: invoice.bulan,
+        jenisClaim: jenisClaim.trim().slice(0, 120),
+        jumlahMitra: 1,
         nominal,
-        catatan,
-        dokumen,
-        dokumenNama: dokumenNama.slice(0, 255),
+        catatan: typeof catatan === "string" ? catatan.trim().slice(0, 2000) : null,
         status: "SUBMITTED",
       },
     });

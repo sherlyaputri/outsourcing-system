@@ -287,6 +287,8 @@ model Claim {
   catatan     String?  @db.Text
   dokumen     String?  @db.LongText
   dokumenNama String?
+  invoiceId   String?
+  invoice     Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
@@ -305,6 +307,23 @@ model Invoice {
   dokumenNama       String?
   buktiTransfer     String?   @db.LongText
   buktiTransferNama String?
+  periodeMulai      DateTime?
+  periodeAkhir      DateTime?
+  detailSnapshot    String?   @db.LongText
+  biayaVendor       Float     @default(0)
+  totalKlaim        Float     @default(0)
+  ppn               Float     @default(0)
+  pph               Float     @default(0)
+  totalTagihan      Float     @default(0)
+  statusPembayaran String    @default("UNPAID")
+  nominalPembayaran Float?
+  tanggalPembayaran DateTime?
+  catatanPembayaran String?   @db.Text
+  publishedAt       DateTime?
+  cancelledAt       DateTime?
+  cancellationReason String?  @db.Text
+  changeHistory     String?   @db.LongText
+  claims            Claim[]
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 }

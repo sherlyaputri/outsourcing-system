@@ -3,68 +3,22 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
-export async function GET(req: NextRequest) {
+const DAY_RATE = 100_000;
+const TAX_PPN = 0.11;
+const TAX_PPH = 0.025;
+const parseDate = (value: unknown) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
+  ? new Date(`${value}T00:00:00+07:00`) : null;
+
+export async function GET() {
   try {
     const session = await getServerSession(authOptions);
-    if (!session) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    let where: any = {};
-
-    if (session.user.role === "VENDOR") {
-      where.vendorId = session.user.vendorId;
-    }
-
+    if (!session || !["VM", "VENDOR"].includes(session.user.role)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const invoices = await prisma.invoice.findMany({
-      where,
-      select: {
-        id: true,
-        vendorId: true,
-        nomorInvoice: true,
-        bulan: true,
-        totalAmount: true,
-        status: true,
-        tanggalJatuhTempo: true,
-        catatan: true,
-        dokumenNama: true,
-        buktiTransferNama: true,
-        createdAt: true,
-        vendor: { select: { id: true, name: true } },
-      },
+      where: session.user.role === "VENDOR" ? { vendorId: session.user.vendorId || "__none__", status: "PUBLISHED" } : {},
+      include: { vendor: { select: { id: true, name: true } }, claims: { select: { id: true, bulan: true, jenisClaim: true, nominal: true, catatan: true, createdAt: true } } },
       orderBy: { createdAt: "desc" },
     });
-
-    // Ambil data klaim untuk vendor/periode terkait guna menghitung potongan klaim otomatis
-    const claims = await prisma.claim.findMany({
-      where: session.user.role === "VENDOR" && session.user.vendorId ? { vendorId: session.user.vendorId } : {},
-      select: {
-        id: true,
-        vendorId: true,
-        bulan: true,
-        jenisClaim: true,
-        nominal: true,
-        status: true,
-        catatan: true,
-      },
-    });
-
-    return NextResponse.json(invoices.map((invoice) => {
-      const matchingClaims = claims.filter(
-        (c) => c.vendorId === invoice.vendorId && c.bulan === invoice.bulan && c.status !== "REJECTED"
-      );
-      const totalPotonganKlaim = matchingClaims.reduce((sum, c) => sum + (c.nominal || 0), 0);
-      const totalBersih = Math.max(0, invoice.totalAmount - totalPotonganKlaim);
-
-      return {
-        ...invoice,
-        hasDokumen: Boolean(invoice.dokumenNama),
-        hasBuktiTransfer: Boolean(invoice.buktiTransferNama),
-        totalPotonganKlaim,
-        totalBersih,
-        claims: matchingClaims,
-      };
-    }));
+    return NextResponse.json(invoices.map((invoice) => ({ ...invoice, hasDokumen: Boolean(invoice.dokumenNama), hasBuktiTransfer: Boolean(invoice.buktiTransferNama), details: invoice.detailSnapshot ? JSON.parse(invoice.detailSnapshot) : null })));
   } catch (error) {
     console.error("Invoice GET error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
@@ -74,49 +28,75 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "VENDOR") {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
+    if (!session || session.user.role !== "VM") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const body = await req.json();
-    const { bulan, totalAmount, tanggalJatuhTempo, catatan, dokumen, dokumenNama } = body;
 
-    if (typeof bulan !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(bulan) ||
-        typeof totalAmount !== "number" || !Number.isFinite(totalAmount) || totalAmount < 0) {
-      return NextResponse.json({ error: "Bulan dan total tagihan tidak valid." }, { status: 400 });
+    if (body.action === "cancel") {
+      const reason = typeof body.reason === "string" ? body.reason.trim().slice(0, 2000) : "";
+      if (!reason) return NextResponse.json({ error: "Alasan pembatalan wajib diisi." }, { status: 400 });
+      const invoice = await prisma.invoice.findUnique({ where: { id: String(body.invoiceId || "") } });
+      if (!invoice) return NextResponse.json({ error: "Invoice tidak ditemukan." }, { status: 404 });
+      if (invoice.status !== "PUBLISHED" || invoice.statusPembayaran === "PAID") return NextResponse.json({ error: "Hanya invoice Published yang belum dibayar dapat dibatalkan." }, { status: 409 });
+      const history = invoice.changeHistory ? JSON.parse(invoice.changeHistory) : [];
+      history.push({ action: "CANCELLED", reason, at: new Date().toISOString(), actorId: session.user.id });
+      const updated = await prisma.invoice.update({ where: { id: invoice.id }, data: { status: "CANCELLED", cancelledAt: new Date(), cancellationReason: reason, changeHistory: JSON.stringify(history) } });
+      return NextResponse.json(updated);
     }
 
-    if (typeof dokumen !== "string" || typeof dokumenNama !== "string" || !dokumenNama.trim()) {
-      return NextResponse.json({ error: "File invoice wajib diunggah." }, { status: 400 });
+    if (body.action === "publish") {
+      const invoice = await prisma.invoice.findUnique({ where: { id: String(body.invoiceId || "") }, include: { claims: true } });
+      if (!invoice) return NextResponse.json({ error: "Invoice tidak ditemukan." }, { status: 404 });
+      if (invoice.status !== "DRAFT") return NextResponse.json({ error: "Hanya invoice Draft yang dapat dipublikasikan." }, { status: 409 });
+      const biayaVendor = invoice.biayaVendor;
+      const totalKlaim = invoice.claims.reduce((sum, claim) => sum + claim.nominal, 0);
+      const ppn = Math.round(biayaVendor * TAX_PPN);
+      const pph = Math.round(biayaVendor * TAX_PPH);
+      const totalTagihan = Math.max(0, biayaVendor + ppn - pph - totalKlaim);
+      const updated = await prisma.invoice.update({ where: { id: invoice.id }, data: { totalKlaim, ppn, pph, totalTagihan, totalAmount: totalTagihan, status: "PUBLISHED", publishedAt: new Date() } });
+      return NextResponse.json(updated);
     }
 
-    const fileMatch = dokumen.match(/^data:(application\/pdf|image\/jpeg|image\/png);base64,([A-Za-z0-9+/]+={0,2})$/);
-    if (!fileMatch) {
-      return NextResponse.json({ error: "File invoice harus berupa PDF, JPG, atau PNG." }, { status: 400 });
-    }
-    const fileSize = Buffer.from(fileMatch[2], "base64").length;
-    if (fileSize === 0 || fileSize > 5 * 1024 * 1024) {
-      return NextResponse.json({ error: "Ukuran file invoice maksimal 5 MB." }, { status: 400 });
-    }
+    const start = parseDate(body.periodeMulai);
+    const end = parseDate(body.periodeAkhir);
+    if (typeof body.vendorId !== "string" || !start || !end || start > end) return NextResponse.json({ error: "Vendor dan periode invoice tidak valid." }, { status: 400 });
+    const vendor = await prisma.vendor.findFirst({ where: { id: body.vendorId, status: "ACTIVE" }, select: { id: true } });
+    if (!vendor) return NextResponse.json({ error: "Vendor tidak ditemukan atau tidak aktif." }, { status: 400 });
+    const monthKey = String(body.periodeMulai).slice(0, 7);
+    const existing = await prisma.invoice.findFirst({ where: { vendorId: vendor.id, periodeMulai: start, periodeAkhir: end, status: { in: ["DRAFT", "PUBLISHED", "PAID"] } } });
+    if (existing) return NextResponse.json({ error: "Invoice untuk vendor dan periode tersebut sudah ada." }, { status: 409 });
 
-    // Generate invoice number
-    const count = await prisma.invoice.count();
-    const nomorInvoice = `INV-${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, "0")}-${String(count + 1).padStart(4, "0")}`;
-
-    const invoice = await prisma.invoice.create({
-      data: {
-        vendorId: session.user.vendorId!,
-        nomorInvoice,
-        bulan,
-        totalAmount,
-        tanggalJatuhTempo: tanggalJatuhTempo ? new Date(tanggalJatuhTempo) : undefined,
-        catatan,
-        dokumen,
-        dokumenNama: dokumenNama.trim().slice(0, 255),
-        status: "SUBMITTED",
-      },
+    const attendance = await prisma.attendance.findMany({
+      where: { date: { gte: start, lt: new Date(end.getTime() + 24 * 60 * 60 * 1000) }, user: { role: "MITRA", vendorId: vendor.id } },
+      include: { user: { select: { id: true, name: true, mitraProfile: { select: { idMitraOs: true, penempatan: true, posisi: true } } } } },
     });
-
+    const workers = new Map<string, { userId: string; name: string; idMitra: string; hub: string; role: string; days: Set<string>; absentDays: Set<string> }>();
+    const vendorWorkers = await prisma.user.findMany({
+      where: { role: "MITRA", vendorId: vendor.id },
+      select: { id: true, name: true, mitraProfile: { select: { idMitraOs: true, penempatan: true, posisi: true } } },
+    });
+    for (const user of vendorWorkers) {
+      workers.set(user.id, { userId: user.id, name: user.name, idMitra: user.mitraProfile?.idMitraOs || "-", hub: user.mitraProfile?.penempatan || "Belum ditentukan", role: user.mitraProfile?.posisi || "-", days: new Set<string>(), absentDays: new Set<string>() });
+    }
+    for (const row of attendance) {
+      const profile = row.user.mitraProfile;
+      const worker = workers.get(row.userId) || { userId: row.userId, name: row.user.name, idMitra: profile?.idMitraOs || "-", hub: profile?.penempatan || "Belum ditentukan", role: profile?.posisi || "-", days: new Set<string>(), absentDays: new Set<string>() };
+      const ymd = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(row.date);
+      if (row.type === "HADIR") worker.days.add(ymd); else worker.absentDays.add(ymd);
+      workers.set(row.userId, worker);
+    }
+    const mitra = Array.from(workers.values()).map((worker) => ({ userId: worker.userId, nama: worker.name, idMitra: worker.idMitra, hub: worker.hub, role: worker.role, hariHadir: worker.days.size, hariTidakHadir: worker.absentDays.size, tarif: DAY_RATE, totalBiaya: worker.days.size * DAY_RATE }));
+    const hubs = new Map<string, { nama: string; jumlahMitra: number; totalHariKerja: number; biayaVendor: number }>();
+    for (const worker of mitra) {
+      const hub = hubs.get(worker.hub) || { nama: worker.hub, jumlahMitra: 0, totalHariKerja: 0, biayaVendor: 0 };
+      hub.jumlahMitra += 1; hub.totalHariKerja += worker.hariHadir; hub.biayaVendor += worker.totalBiaya; hubs.set(worker.hub, hub);
+    }
+    const biayaVendor = mitra.reduce((sum, worker) => sum + worker.totalBiaya, 0);
+    const count = await prisma.invoice.count();
+    const nomorInvoice = `INV-${monthKey.replace("-", "")}-${String(count + 1).padStart(4, "0")}`;
+    const invoice = await prisma.invoice.create({ data: {
+      vendorId: vendor.id, nomorInvoice, bulan: monthKey, totalAmount: biayaVendor, status: "DRAFT", periodeMulai: start, periodeAkhir: end, biayaVendor,
+      detailSnapshot: JSON.stringify({ hubs: Array.from(hubs.values()), mitra }),
+    } });
     return NextResponse.json({ id: invoice.id }, { status: 201 });
   } catch (error) {
     console.error("Invoice POST error:", error);

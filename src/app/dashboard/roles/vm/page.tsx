@@ -3,7 +3,6 @@
 import {
   Building2,
   CheckCircle,
-  ClipboardList,
   FileText,
   Receipt,
   Users,
@@ -40,12 +39,6 @@ export default function VMDashboardPage() {
             value={stats.pendingRequests || 0}
             icon={<FileText size={24} />}
             href="/dashboard/request-os"
-          />
-          <StatCard
-            title="Klaim Pending"
-            value={stats.totalKlaim || 0}
-            icon={<ClipboardList size={24} />}
-            href="/dashboard/klaim"
           />
           <StatCard
             title="Invoice Pending"
