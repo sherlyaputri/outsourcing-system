@@ -12,9 +12,9 @@ const parseDate = (value: unknown) => typeof value === "string" && /^\d{4}-\d{2}
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !["VM", "VENDOR"].includes(session.user.role)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!session || !["VM", "VENDOR", "FINANCE"].includes(session.user.role)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const invoices = await prisma.invoice.findMany({
-      where: session.user.role === "VENDOR" ? { vendorId: session.user.vendorId || "__none__", status: "PUBLISHED" } : {},
+      where: session.user.role === "VENDOR" ? { vendorId: session.user.vendorId || "__none__", status: { in: ["PUBLISHED", "PAID"] } } : {},
       include: { vendor: { select: { id: true, name: true } }, claims: { select: { id: true, bulan: true, jenisClaim: true, nominal: true, catatan: true, createdAt: true } } },
       orderBy: { createdAt: "desc" },
     });
@@ -28,7 +28,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "VM") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!session || session.user.role !== "FINANCE") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const body = await req.json();
 
     if (body.action === "cancel") {

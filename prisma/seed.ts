@@ -38,6 +38,11 @@ async function main() {
     },
   });
 
+  // Create Finance User
+  await prisma.user.create({
+    data: { email: 'fin@wahana.com', password: hashedPassword, name: 'Finance', role: 'FINANCE', status: 'ACTIVE' },
+  });
+
   // Create SM User
   await prisma.user.create({
     data: {
@@ -153,6 +158,7 @@ async function main() {
   console.log('Seed data created successfully!');
   console.log('Login credentials:');
   console.log('VM: vm@wahana.com / password123');
+  console.log('Finance: fin@wahana.com / password 123');
   console.log('SM: sm@wahana.com / password123');
   console.log('GM: gm@wahana.com / password123');
   console.log('COO: coo@wahana.com / password123');

@@ -9,6 +9,7 @@ const dashboardPaths: Record<string, string> = {
   MITRA: "/dashboard/roles/mitra",
   VENDOR: "/dashboard/roles/vendor",
   VM: "/dashboard/roles/vm",
+  FINANCE: "/dashboard/roles/finance",
   SM: "/dashboard/roles/sm",
   GM: "/dashboard/roles/gm",
   COO: "/dashboard/roles/coo",

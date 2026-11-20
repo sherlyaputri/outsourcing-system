@@ -68,6 +68,8 @@ function getNavItems(role: string): NavItem[] {
         { label: "Daftar Invoice", href: "/dashboard/invoice", icon: <Receipt size={20} /> },
         { label: "Request OS", href: "/dashboard/request-os", icon: <FileText size={20} /> },
       ];
+    case "FINANCE":
+      return [dashboardItem, { label: "Invoice & Klaim", href: "/dashboard/invoice", icon: <Receipt size={20} /> }];
     case "SM":
       return [
         dashboardItem,
@@ -94,6 +96,7 @@ function getRoleLabel(role: string): string {
     MITRA: "Mitra OS",
     VENDOR: "Vendor OS",
     VM: "Vendor Manager",
+    FINANCE: "Finance",
     SM: "Site Manager",
     GM: "General Manager",
     COO: "Chief Operating Officer",

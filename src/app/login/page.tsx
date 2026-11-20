@@ -111,6 +111,7 @@ export default function LoginPage() {
             <p className="text-xs font-medium text-muted-foreground mb-2">Akun Demo:</p>
             <div className="grid grid-cols-2 gap-1 text-xs text-muted-foreground">
               <span>VM:</span><span>vm@wahana.com</span>
+              <span>Finance:</span><span>fin@wahana.com</span>
               <span>SM:</span><span>sm@wahana.com</span>
               <span>GM:</span><span>gm@wahana.com</span>
               <span>COO:</span><span>coo@wahana.com</span>

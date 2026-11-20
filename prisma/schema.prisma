@@ -13,7 +13,7 @@ model User {
   password                 String
   initialPasswordEncrypted String?       @db.Text
   name                     String
-  role                     String // MITRA, VENDOR, VM, SM, GM, COO
+  role                     String // MITRA, VENDOR, VM, FINANCE, SM, GM, COO
   status                   String        @default("ACTIVE") // ACTIVE, INACTIVE, PENDING
   phone                    String?
   avatar                   String?       @db.LongText

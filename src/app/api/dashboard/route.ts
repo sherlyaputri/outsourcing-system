@@ -53,6 +53,10 @@ export async function GET() {
         where: { requesterId: session.user.id, status: "PENDING" },
       });
       stats = { totalMitra, totalKlaim, totalInvoice, pendingAccountReqs };
+    } else if (role === "FINANCE") {
+      const totalInvoice = await prisma.invoice.count();
+      const totalKlaim = await prisma.claim.count();
+      return NextResponse.json({ totalInvoice, totalKlaim });
     } else if (role === "VM") {
       const totalVendor = await prisma.vendor.count({ where: { status: "ACTIVE" } });
       const totalMitra = await prisma.user.count({ where: { role: "MITRA", status: "ACTIVE" } });

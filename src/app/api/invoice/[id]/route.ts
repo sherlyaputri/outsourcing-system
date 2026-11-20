@@ -9,7 +9,7 @@ export async function GET(
 ) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || !["VENDOR", "VM"].includes(session.user.role)) {
+    if (!session || !["VENDOR", "VM", "FINANCE"].includes(session.user.role)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -59,7 +59,7 @@ export async function GET(
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "VM") {
+    if (!session || session.user.role !== "FINANCE") {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -113,7 +113,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const session = await getServerSession(authOptions);
-    if (!session || session.user.role !== "VM") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    if (!session || session.user.role !== "FINANCE") return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const invoice = await prisma.invoice.findUnique({ where: { id: params.id }, select: { id: true, status: true } });
     if (!invoice) return NextResponse.json({ error: "Invoice tidak ditemukan." }, { status: 404 });
     if (invoice.status !== "DRAFT") return NextResponse.json({ error: "Hanya invoice Draft yang dapat dihapus." }, { status: 409 });
