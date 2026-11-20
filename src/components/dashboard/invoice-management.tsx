@@ -39,6 +39,21 @@ export function InvoiceManagementPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [paymentId, setPaymentId] = useState<string | null>(null);
+  const [invoiceToPrint, setInvoiceToPrint] = useState<Invoice | null>(null);
+
+  useEffect(() => {
+    if (!invoiceToPrint) return;
+    const afterPrint = () => setInvoiceToPrint(null);
+    window.addEventListener("afterprint", afterPrint, { once: true });
+    const timeout = window.setTimeout(() => {
+      const logo = document.querySelector<HTMLImageElement>("#invoice-print-root .print-logo");
+      void (logo?.decode().catch(() => undefined) ?? Promise.resolve()).finally(() => window.print());
+    }, 100);
+    return () => {
+      window.clearTimeout(timeout);
+      window.removeEventListener("afterprint", afterPrint);
+    };
+  }, [invoiceToPrint]);
 
   async function reload() {
     try { const data = await request("/api/invoice"); setInvoices(data); setSelected((current) => current ? data.find((item: Invoice) => item.id === current.id) || current : null); }
@@ -113,7 +128,7 @@ export function InvoiceManagementPage() {
       </form>}
       <div className="overflow-x-auto rounded-xl border bg-card">
         <table className="w-full min-w-[1000px] text-left text-sm"><thead className="bg-muted/50"><tr>{["No. Transaksi", "Vendor", "Periode", "Hub", "Mitra", "Hari Hadir", "Biaya Vendor", "Klaim", "PPN", "PPh", "Total Tagihan", "Invoice", "Pembayaran", "Tanggal Bayar", "Aksi"].map(h => <th key={h} className="p-3 font-medium">{h}</th>)}</tr></thead>
-          <tbody>{invoices.map(invoice => <tr key={invoice.id} className="border-t"><td className="p-3 font-mono">{invoice.nomorInvoice}</td><td className="p-3">{invoice.vendor?.name}</td><td className="p-3">{dateLabel(invoice.periodeMulai)} – {dateLabel(invoice.periodeAkhir)}</td><td className="p-3">{invoice.details?.hubs.length ?? "-"}</td><td className="p-3">{invoice.details?.mitra.length ?? "-"}</td><td className="p-3">{invoice.details?.mitra.reduce((s, m) => s + m.hariHadir, 0) ?? "-"}</td><td className="p-3">{formatCurrency(invoice.biayaVendor)}</td><td className="p-3">{formatCurrency(claimTotal(invoice))}</td><td className="p-3">{formatCurrency(invoicePpn(invoice))}</td><td className="p-3">{formatCurrency(invoicePph(invoice))}</td><td className="p-3 font-semibold">{formatCurrency(invoiceTotal(invoice))}</td><td className="p-3">{invoice.status}</td><td className="p-3">{invoice.statusPembayaran === "PAID" ? "Paid" : invoice.status === "PUBLISHED" ? "Unpaid" : "-"}</td><td className="p-3">{dateLabel(invoice.tanggalPembayaran)}</td><td className="p-3"><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => setSelected(invoice)}>Detail</Button>{isFinance && invoice.status === "DRAFT" && <><Button size="sm" variant="outline" onClick={() => setSelected(invoice)}>Tambah Klaim</Button><Button size="sm" disabled={busy} onClick={() => void publish(invoice)}>Publish</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => void deleteDraft(invoice)}>Hapus Draft</Button></>}{isFinance && invoice.status === "PUBLISHED" && invoice.statusPembayaran !== "PAID" && <><Button size="sm" onClick={() => setPaymentId(invoice.id)}>Konfirmasi Pembayaran</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => void cancel(invoice)}>Batalkan</Button></>}{invoice.statusPembayaran === "PAID" && <a className="rounded border px-2 py-1 text-xs" href={`/api/invoice/${invoice.id}?type=transfer`} target="_blank">Bukti Transfer</a>}<Button size="sm" variant="outline" onClick={() => window.print()}>Cetak</Button></div></td></tr>)}
+          <tbody>{invoices.map(invoice => <tr key={invoice.id} className="border-t"><td className="p-3 font-mono">{invoice.nomorInvoice}</td><td className="p-3">{invoice.vendor?.name}</td><td className="p-3">{dateLabel(invoice.periodeMulai)} – {dateLabel(invoice.periodeAkhir)}</td><td className="p-3">{invoice.details?.hubs.length ?? "-"}</td><td className="p-3">{invoice.details?.mitra.length ?? "-"}</td><td className="p-3">{invoice.details?.mitra.reduce((s, m) => s + m.hariHadir, 0) ?? "-"}</td><td className="p-3">{formatCurrency(invoice.biayaVendor)}</td><td className="p-3">{formatCurrency(claimTotal(invoice))}</td><td className="p-3">{formatCurrency(invoicePpn(invoice))}</td><td className="p-3">{formatCurrency(invoicePph(invoice))}</td><td className="p-3 font-semibold">{formatCurrency(invoiceTotal(invoice))}</td><td className="p-3">{invoice.status}</td><td className="p-3">{invoice.statusPembayaran === "PAID" ? "Paid" : invoice.status === "PUBLISHED" ? "Unpaid" : "-"}</td><td className="p-3">{dateLabel(invoice.tanggalPembayaran)}</td><td className="p-3"><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" onClick={() => setSelected(invoice)}>Detail</Button>{isFinance && invoice.status === "DRAFT" && <><Button size="sm" variant="outline" onClick={() => setSelected(invoice)}>Tambah Klaim</Button><Button size="sm" disabled={busy} onClick={() => void publish(invoice)}>Publish</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => void deleteDraft(invoice)}>Hapus Draft</Button></>}{isFinance && invoice.status === "PUBLISHED" && invoice.statusPembayaran !== "PAID" && <><Button size="sm" onClick={() => setPaymentId(invoice.id)}>Konfirmasi Pembayaran</Button><Button size="sm" variant="outline" disabled={busy} onClick={() => void cancel(invoice)}>Batalkan</Button></>}{invoice.statusPembayaran === "PAID" && <a className="rounded border px-2 py-1 text-xs" href={`/api/invoice/${invoice.id}?type=transfer`} target="_blank">Bukti Transfer</a>}<Button size="sm" variant="outline" onClick={() => setInvoiceToPrint(invoice)}>Cetak</Button></div></td></tr>)}
           {!invoices.length && <tr><td className="p-6 text-center text-muted-foreground" colSpan={15}>Belum ada invoice.</td></tr>}</tbody>
         </table>
       </div>
@@ -126,6 +141,20 @@ export function InvoiceManagementPage() {
         {selected.status === "DRAFT" && <p className="text-xs text-muted-foreground">Draft: biaya dihitung dari jumlah absensi HADIR × Rp100.000. Pajak dihitung dari biaya vendor; total klaim dikurangkan penuh.</p>}
       </div></div>}
       {paymentId && (() => { const invoice = invoices.find(i => i.id === paymentId); return invoice ? <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"><form onSubmit={e => void pay(e, invoice)} className="w-full max-w-md space-y-3 rounded-xl bg-background p-5"><h2 className="text-lg font-bold">Konfirmasi Pembayaran</h2><p>Total invoice: {formatCurrency(invoice.totalTagihan)}</p><label className="block text-sm">Nominal pembayaran<input required type="number" name="nominalPembayaran" defaultValue={invoice.totalTagihan} className="mt-1 w-full rounded border bg-background p-2" /></label><label className="block text-sm">Tanggal pembayaran<input required type="date" name="tanggalPembayaran" className="mt-1 w-full rounded border bg-background p-2" /></label><label className="block text-sm">Bukti transfer<input required type="file" name="proof" accept=".pdf,.jpg,.jpeg,.png" className="mt-1 w-full" /></label><label className="block text-sm">Keterangan (opsional)<input name="catatanPembayaran" className="mt-1 w-full rounded border bg-background p-2" /></label><div className="flex justify-end gap-2"><Button type="button" variant="outline" onClick={() => setPaymentId(null)}>Batal</Button><Button disabled={busy}>Konfirmasi Paid</Button></div></form></div> : null; })()}
+      {invoiceToPrint && <article id="invoice-print-root" aria-hidden="true">
+        <header className="print-brand"><img src="/images/logo-wahana-clean.svg" alt="Wahana Express" className="print-logo" /></header>
+        <h1 className="print-title">INVOICE LAYANAN OUTSOURCING</h1>
+        <section className="print-meta">
+          <div><p><strong>No. Invoice</strong><b>:</b>{invoiceToPrint.nomorInvoice}</p><p><strong>Vendor</strong><b>:</b>{invoiceToPrint.vendor?.name || "-"}</p><p><strong>Status Invoice</strong><b>:</b>{invoiceToPrint.status}</p></div>
+          <div><p><strong>Tanggal Cetak</strong><b>:</b>{dateLabel(new Date().toISOString())}</p><p><strong>Periode</strong><b>:</b>{dateLabel(invoiceToPrint.periodeMulai)} – {dateLabel(invoiceToPrint.periodeAkhir)}</p><p><strong>Tanggal Pembayaran</strong><b>:</b>{dateLabel(invoiceToPrint.tanggalPembayaran)}</p></div>
+        </section>
+        <table className="print-table"><thead><tr><th>Keterangan</th><th>Jumlah Mitra</th><th>Hari Kerja</th><th>Biaya Vendor</th></tr></thead><tbody>
+          {invoiceToPrint.details?.hubs?.length ? invoiceToPrint.details.hubs.map(hub => <tr key={hub.nama}><td>Layanan outsourcing – {hub.nama}</td><td>{hub.jumlahMitra}</td><td>{hub.totalHariKerja}</td><td>{formatCurrency(hub.biayaVendor)}</td></tr>) : <tr><td>Layanan outsourcing</td><td>{invoiceToPrint.details?.mitra.length ?? 0}</td><td>{invoiceToPrint.details?.mitra.reduce((sum, mitra) => sum + mitra.hariHadir, 0) ?? 0}</td><td>{formatCurrency(invoiceToPrint.biayaVendor)}</td></tr>}
+        </tbody></table>
+        <section className="print-summary"><h2>RINGKASAN TAGIHAN</h2><p><span>Biaya Vendor</span><strong>{formatCurrency(invoiceToPrint.biayaVendor)}</strong></p><p><span>PPN (11%)</span><strong>{formatCurrency(invoicePpn(invoiceToPrint))}</strong></p><p><span>PPh (2,5%)</span><strong>− {formatCurrency(invoicePph(invoiceToPrint))}</strong></p><p><span>Total Klaim</span><strong>− {formatCurrency(claimTotal(invoiceToPrint))}</strong></p><p className="print-total"><span>TOTAL TAGIHAN</span><strong>{formatCurrency(invoiceTotal(invoiceToPrint))}</strong></p></section>
+        {invoiceToPrint.claims.length > 0 && <section className="print-claims"><h2>RINCIAN KLAIM</h2>{invoiceToPrint.claims.map(claim => <p key={claim.id}><span>{claim.jenisClaim}{claim.catatan ? ` — ${claim.catatan}` : ""}</span><strong>{formatCurrency(claim.nominal)}</strong></p>)}</section>}
+        <footer className="print-footer">Invoice ini diterbitkan oleh Wahana untuk rincian tagihan layanan outsourcing pada periode tersebut.</footer>
+      </article>}
     </div>
   </DashboardLayout>;
 }
