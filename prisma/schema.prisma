@@ -44,6 +44,7 @@ model Vendor {
   bankAccountName    String?
   bankAccountNumber  String?
   companyTaxStatus   String?
+  managementFeeRate  Float     @default(0.035)
   status             String    @default("PENDING") // PENDING, ACTIVE, INACTIVE
   removalReason      String?   @db.Text
   removedAt          DateTime?
@@ -311,6 +312,8 @@ model Invoice {
   periodeAkhir      DateTime?
   detailSnapshot    String?   @db.LongText
   biayaVendor       Float     @default(0)
+  managementFeeRate Float     @default(0.035)
+  managementFee     Float     @default(0)
   totalKlaim        Float     @default(0)
   ppn               Float     @default(0)
   pph               Float     @default(0)

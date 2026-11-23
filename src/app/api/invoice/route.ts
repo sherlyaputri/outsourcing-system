@@ -4,17 +4,21 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const DAY_RATE = 100_000;
-const TAX_PPN = 0.11;
-const TAX_PPH = 0.025;
-const parseDate = (value: unknown) => typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)
-  ? new Date(`${value}T00:00:00+07:00`) : null;
+const parseMonth = (value: unknown) => {
+  if (typeof value !== "string" || !/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) return null;
+  const [year, month] = value.split("-").map(Number);
+  const nextMonth = month === 12 ? `${year + 1}-01` : `${year}-${String(month + 1).padStart(2, "0")}`;
+  return { start: new Date(`${value}-01T00:00:00+07:00`), end: new Date(new Date(`${nextMonth}-01T00:00:00+07:00`).getTime() - 1) };
+};
 
 export async function GET() {
   try {
     const session = await getServerSession(authOptions);
     if (!session || !["VM", "VENDOR", "FINANCE"].includes(session.user.role)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const invoices = await prisma.invoice.findMany({
-      where: session.user.role === "VENDOR" ? { vendorId: session.user.vendorId || "__none__", status: { in: ["PUBLISHED", "PAID"] } } : {},
+      where: session.user.role === "VENDOR"
+        ? { vendorId: session.user.vendorId || "__none__", status: { in: ["PUBLISHED", "PAID"] } }
+        : { status: { not: "CANCELLED" } },
       include: { vendor: { select: { id: true, name: true } }, claims: { select: { id: true, bulan: true, jenisClaim: true, nominal: true, catatan: true, createdAt: true } } },
       orderBy: { createdAt: "desc" },
     });
@@ -37,10 +41,12 @@ export async function POST(req: NextRequest) {
       const invoice = await prisma.invoice.findUnique({ where: { id: String(body.invoiceId || "") } });
       if (!invoice) return NextResponse.json({ error: "Invoice tidak ditemukan." }, { status: 404 });
       if (invoice.status !== "PUBLISHED" || invoice.statusPembayaran === "PAID") return NextResponse.json({ error: "Hanya invoice Published yang belum dibayar dapat dibatalkan." }, { status: 409 });
-      const history = invoice.changeHistory ? JSON.parse(invoice.changeHistory) : [];
-      history.push({ action: "CANCELLED", reason, at: new Date().toISOString(), actorId: session.user.id });
-      const updated = await prisma.invoice.update({ where: { id: invoice.id }, data: { status: "CANCELLED", cancelledAt: new Date(), cancellationReason: reason, changeHistory: JSON.stringify(history) } });
-      return NextResponse.json(updated);
+      await prisma.$transaction([
+        prisma.claim.deleteMany({ where: { invoiceId: invoice.id } }),
+        prisma.invoice.delete({ where: { id: invoice.id } }),
+      ]);
+      console.info("Invoice cancelled and deleted", { invoiceId: invoice.id, invoiceNumber: invoice.nomorInvoice, actorId: session.user.id, reason });
+      return NextResponse.json({ deleted: true, id: invoice.id });
     }
 
     if (body.action === "publish") {
@@ -48,22 +54,40 @@ export async function POST(req: NextRequest) {
       if (!invoice) return NextResponse.json({ error: "Invoice tidak ditemukan." }, { status: 404 });
       if (invoice.status !== "DRAFT") return NextResponse.json({ error: "Hanya invoice Draft yang dapat dipublikasikan." }, { status: 409 });
       const biayaVendor = invoice.biayaVendor;
+      const managementFee = Math.round(biayaVendor * invoice.managementFeeRate);
       const totalKlaim = invoice.claims.reduce((sum, claim) => sum + claim.nominal, 0);
-      const ppn = Math.round(biayaVendor * TAX_PPN);
-      const pph = Math.round(biayaVendor * TAX_PPH);
-      const totalTagihan = Math.max(0, biayaVendor + ppn - pph - totalKlaim);
-      const updated = await prisma.invoice.update({ where: { id: invoice.id }, data: { totalKlaim, ppn, pph, totalTagihan, totalAmount: totalTagihan, status: "PUBLISHED", publishedAt: new Date() } });
+      const ppn = Math.round(managementFee * 0.11);
+      const pph = Math.round(managementFee * 0.025);
+      const totalTagihan = Math.max(0, biayaVendor + managementFee + ppn - pph - totalKlaim);
+      const updated = await prisma.invoice.update({ where: { id: invoice.id }, data: { managementFee, totalKlaim, ppn, pph, totalTagihan, totalAmount: totalTagihan, status: "PUBLISHED", publishedAt: new Date() } });
       return NextResponse.json(updated);
     }
 
-    const start = parseDate(body.periodeMulai);
-    const end = parseDate(body.periodeAkhir);
-    if (typeof body.vendorId !== "string" || !start || !end || start > end) return NextResponse.json({ error: "Vendor dan periode invoice tidak valid." }, { status: 400 });
-    const vendor = await prisma.vendor.findFirst({ where: { id: body.vendorId, status: "ACTIVE" }, select: { id: true } });
+    const month = parseMonth(body.bulan);
+    if (typeof body.vendorId !== "string" || !month) return NextResponse.json({ error: "Vendor dan bulan invoice tidak valid." }, { status: 400 });
+    const start = month.start;
+    const end = month.end;
+    const vendor = await prisma.vendor.findFirst({ where: { id: body.vendorId, status: "ACTIVE" }, select: { id: true, managementFeeRate: true } });
     if (!vendor) return NextResponse.json({ error: "Vendor tidak ditemukan atau tidak aktif." }, { status: 400 });
-    const monthKey = String(body.periodeMulai).slice(0, 7);
-    const existing = await prisma.invoice.findFirst({ where: { vendorId: vendor.id, periodeMulai: start, periodeAkhir: end, status: { in: ["DRAFT", "PUBLISHED", "PAID"] } } });
-    if (existing) return NextResponse.json({ error: "Invoice untuk vendor dan periode tersebut sudah ada." }, { status: 409 });
+    const monthKey = String(body.bulan);
+    const monthInvoices = await prisma.invoice.findMany({
+      where: { vendorId: vendor.id, bulan: monthKey },
+      select: { id: true, nomorInvoice: true, status: true },
+    });
+    const cancelledInvoices = monthInvoices.filter((invoice) => invoice.status.trim().toUpperCase() === "CANCELLED");
+    if (cancelledInvoices.length) {
+      const cancelledIds = cancelledInvoices.map((invoice) => invoice.id);
+      await prisma.$transaction([
+        prisma.claim.deleteMany({ where: { invoiceId: { in: cancelledIds } } }),
+        prisma.invoice.deleteMany({ where: { id: { in: cancelledIds } } }),
+      ]);
+    }
+    const blockingInvoice = monthInvoices.find((invoice) => invoice.status.trim().toUpperCase() !== "CANCELLED");
+    if (blockingInvoice) {
+      return NextResponse.json({
+        error: `Invoice untuk vendor dan bulan tersebut sudah ada (${blockingInvoice.nomorInvoice}, status ${blockingInvoice.status}).`,
+      }, { status: 409 });
+    }
 
     const attendance = await prisma.attendance.findMany({
       where: { date: { gte: start, lt: new Date(end.getTime() + 24 * 60 * 60 * 1000) }, user: { role: "MITRA", vendorId: vendor.id } },
@@ -91,10 +115,14 @@ export async function POST(req: NextRequest) {
       hub.jumlahMitra += 1; hub.totalHariKerja += worker.hariHadir; hub.biayaVendor += worker.totalBiaya; hubs.set(worker.hub, hub);
     }
     const biayaVendor = mitra.reduce((sum, worker) => sum + worker.totalBiaya, 0);
-    const count = await prisma.invoice.count();
-    const nomorInvoice = `INV-${monthKey.replace("-", "")}-${String(count + 1).padStart(4, "0")}`;
+    let sequence = (await prisma.invoice.count()) + 1;
+    let nomorInvoice = `INV-${monthKey.replace("-", "")}-${String(sequence).padStart(4, "0")}`;
+    while (await prisma.invoice.findUnique({ where: { nomorInvoice }, select: { id: true } })) {
+      sequence += 1;
+      nomorInvoice = `INV-${monthKey.replace("-", "")}-${String(sequence).padStart(4, "0")}`;
+    }
     const invoice = await prisma.invoice.create({ data: {
-      vendorId: vendor.id, nomorInvoice, bulan: monthKey, totalAmount: biayaVendor, status: "DRAFT", periodeMulai: start, periodeAkhir: end, biayaVendor,
+      vendorId: vendor.id, nomorInvoice, bulan: monthKey, totalAmount: biayaVendor, status: "DRAFT", periodeMulai: start, periodeAkhir: end, biayaVendor, managementFeeRate: vendor.managementFeeRate,
       detailSnapshot: JSON.stringify({ hubs: Array.from(hubs.values()), mitra }),
     } });
     return NextResponse.json({ id: invoice.id }, { status: 201 });

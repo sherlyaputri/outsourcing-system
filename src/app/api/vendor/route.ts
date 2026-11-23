@@ -160,6 +160,16 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json(result);
     }
 
+    if (action === "UPDATE_MANAGEMENT_FEE") {
+      const rate = Number(body.managementFeeRate);
+      if (!vendorId || !Number.isFinite(rate) || rate < 0.035 || rate > 0.04) {
+        return NextResponse.json({ error: "Management fee harus antara 3,5% dan 4%." }, { status: 400 });
+      }
+      const vendor = await prisma.vendor.findUnique({ where: { id: vendorId }, select: { id: true } });
+      if (!vendor) return NextResponse.json({ error: "Vendor tidak ditemukan." }, { status: 404 });
+      return NextResponse.json(await prisma.vendor.update({ where: { id: vendorId }, data: { managementFeeRate: rate } }));
+    }
+
     const reason = typeof body.reason === "string" ? body.reason.trim() : "";
     if (!vendorId || !reason) {
       return NextResponse.json({ error: "Pilih Vendor dan isi alasan remove." }, { status: 400 });

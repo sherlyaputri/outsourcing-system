@@ -33,6 +33,7 @@ interface Vendor {
   bankAccountName?: string | null;
   bankAccountNumber?: string | null;
   companyTaxStatus?: string | null;
+  managementFeeRate: number;
   initialUsername?: string | null;
   initialPassword?: string | null;
   removalReason?: string | null;
@@ -678,6 +679,7 @@ export function MitraManagementPage() {
 function MitraShiftDialog({ mitra, onClose, onSaved }: { mitra: Mitra; onClose: () => void; onSaved: () => void }) {
   const [shift, setShift] = useState(mitra.mitraProfile?.waktuKerja || "08:00-17:00");
   const [saving, setSaving] = useState(false);
+
   const [error, setError] = useState<string | null>(null);
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -2456,6 +2458,18 @@ export function VendorManagementPage() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  async function updateManagementFee(vendor: Vendor, rate: number) {
+    setError(null);
+    setSaving(true);
+    try {
+      const updated = await sendJson("/api/vendor", "PATCH", { action: "UPDATE_MANAGEMENT_FEE", vendorId: vendor.id, managementFeeRate: rate });
+      setDetailVendor((current) => current?.id === vendor.id ? { ...current, ...updated } : current);
+      vendors.reload();
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : "Gagal menyimpan management fee.");
+    } finally { setSaving(false); }
+  }
+
   async function createVendor(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
@@ -2588,6 +2602,11 @@ export function VendorManagementPage() {
           <p>Nama Vendor: <strong>{detailVendor.name}</strong></p><p>Status: <StatusBadge status={detailVendor.status} /></p>
           <p>Email: <strong>{detailVendor.email || "-"}</strong></p><p>No. Telepon: <strong>{detailVendor.phone || "-"}</strong></p>
           <p>Jumlah Mitra OS: <strong>{detailVendor._count?.users || 0}</strong></p>
+          <label className="flex items-center gap-2">Management fee
+            <select className={fieldClass} value={detailVendor.managementFeeRate ?? 0.035} disabled={saving} onChange={(event) => void updateManagementFee(detailVendor, Number(event.target.value))}>
+              <option value="0.035">3,5%</option><option value="0.04">4%</option>
+            </select>
+          </label>
           <p>Alamat: <strong>{detailVendor.address || "-"}</strong></p><p>NPWP: <strong>{detailVendor.npwp || "-"}</strong></p>
           <p>Nama PIC: <strong>{detailVendor.picName || "-"}</strong></p><p>No. HP PIC: <strong>{detailVendor.picPhone || "-"}</strong></p>
           <p>Status pajak: <strong>{detailVendor.companyTaxStatus === "NON_PKP" ? "Non-PKP" : detailVendor.companyTaxStatus || "-"}</strong></p>

@@ -31,6 +31,7 @@ interface AttendanceRecord {
   longitudeCheckOut?: number | null;
   user?: { id?: string; name: string; mitraProfile?: { waktuKerja?: string | null; idMitraOs?: string | null; status?: string | null; posisi?: string | null; penempatan?: string | null } | null };
 }
+interface AttendanceMitraOption { id: string; name: string; status?: string; mitraProfile?: { penempatan?: string | null } | null }
 
 function LocationLink({ latitude, longitude, label }: {
   latitude?: number | null;
@@ -99,6 +100,7 @@ function AttendanceDetailTable({
   sort = null,
   onSort,
   onPhoto,
+  onEdit,
 }: {
   records: AttendanceRecord[];
   showName?: boolean;
@@ -106,6 +108,7 @@ function AttendanceDetailTable({
   sort?: { column: string; direction: "asc" | "desc" } | null;
   onSort?: (column: string) => void;
   onPhoto: (photo: { src: string; title: string }) => void;
+  onEdit?: (record: AttendanceRecord) => void;
 }) {
   const [page, setPage] = useState(1);
 
@@ -126,6 +129,7 @@ function AttendanceDetailTable({
     { key: "photo", label: "Foto" },
     { key: "status", label: "Status" },
     { key: "note", label: "Catatan" },
+    ...(onEdit ? [{ key: "edit", label: "Aksi" }] : []),
   ];
 
   return (
@@ -250,6 +254,7 @@ function AttendanceDetailTable({
                   )}
                 </TableCell>
                 <TableCell className="text-sm text-muted-foreground">{att.note || "-"}</TableCell>
+                {onEdit && <TableCell><Button type="button" size="sm" variant="outline" onClick={() => onEdit(att)}>Edit</Button></TableCell>}
               </TableRow>
             );
           })
@@ -518,6 +523,13 @@ export default function RiwayatAbsensiPage() {
   const [filter, setFilter] = useState("");
   const [sort, setSort] = useState<{ column: string; direction: "asc" | "desc" } | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [editRecord, setEditRecord] = useState<AttendanceRecord | null>(null);
+  const [editForm, setEditForm] = useState({ office: "", userId: "", type: "HADIR", reason: "" });
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [mitraOptions, setMitraOptions] = useState<AttendanceMitraOption[]>([]);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [savingManual, setSavingManual] = useState(false);
+  const [manualForm, setManualForm] = useState({ office: "", userId: "", date: formatLocalYmd(new Date()), type: "HADIR", reason: "" });
   const [startDate, setStartDate] = useState(() => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
@@ -545,6 +557,13 @@ export default function RiwayatAbsensiPage() {
       cancelled = true;
     };
   }, [startDate, endDate]);
+
+  useEffect(() => {
+    if (session?.user.role !== "VM") return;
+    fetch("/api/mitra").then((response) => response.json()).then((data) => {
+      if (Array.isArray(data)) setMitraOptions(data.filter((item) => item.status === "ACTIVE"));
+    }).catch(() => undefined);
+  }, [session?.user.role]);
 
   const handleExport = async () => {
     try {
@@ -628,6 +647,84 @@ export default function RiwayatAbsensiPage() {
       loading: false,
     });
   };
+
+  const handleEditRecord = (record: AttendanceRecord) => {
+    const office = record.user?.mitraProfile?.penempatan || "";
+    setEditRecord(record);
+    setEditForm({
+      office,
+      userId: record.user?.id || "",
+      type: record.type,
+      reason: "",
+    });
+  };
+
+  const saveAttendanceEdit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editRecord) return;
+    setSavingEdit(true);
+    try {
+      const response = await fetch(`/api/attendance/${editRecord.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: editForm.userId,
+          date: new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Jakarta", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(editRecord.date)),
+          type: editForm.type,
+          reason: editForm.reason,
+        }),
+      });
+      const updated = await response.json();
+      if (!response.ok) throw new Error(updated.error || "Gagal memperbarui absensi.");
+      const selectedMitra = mitraOptions.find((mitra) => mitra.id === editForm.userId);
+      const merged = {
+        ...editRecord,
+        ...updated,
+        user: selectedMitra ? {
+          ...editRecord.user,
+          id: selectedMitra.id,
+          name: selectedMitra.name,
+          mitraProfile: { ...editRecord.user?.mitraProfile, penempatan: selectedMitra.mitraProfile?.penempatan },
+        } : editRecord.user,
+      } as AttendanceRecord;
+      setAttendances((current) => current.map((record) => record.id === merged.id ? merged : record));
+      setDetailModal((current) => current ? {
+        ...current,
+        records: current.records.map((record) => record.id === merged.id ? merged : record),
+      } : current);
+      setEditRecord(null);
+      toast.success("Data absensi berhasil diperbarui.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Gagal memperbarui absensi.");
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  const createManualAttendance = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSavingManual(true);
+    try {
+      const response = await fetch("/api/attendance/manual", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(manualForm),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Gagal mencatat absensi manual.");
+      const params = buildAttendanceDateParams(startDate, endDate);
+      const recordsResponse = await fetch(`/api/attendance${params.size ? `?${params.toString()}` : ""}`);
+      const records = await recordsResponse.json();
+      if (recordsResponse.ok && Array.isArray(records)) setAttendances(records);
+      setManualOpen(false);
+      setManualForm({ office: "", userId: "", date: formatLocalYmd(new Date()), type: "HADIR", reason: "" });
+      toast.success("Absensi manual berhasil dicatat.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Gagal mencatat absensi manual.");
+    } finally { setSavingManual(false); }
+  };
+
+  const officeOptions = Array.from(new Set(mitraOptions.map((mitra) => mitra.mitraProfile?.penempatan?.trim()).filter((office): office is string => Boolean(office)))).sort((a, b) => a.localeCompare(b, "id"));
+  const manualMitraOptions = mitraOptions.filter((mitra) => mitra.mitraProfile?.penempatan === manualForm.office);
+  const editMitraOptions = mitraOptions.filter((mitra) => mitra.mitraProfile?.penempatan === editForm.office);
 
   const filteredAttendances = attendances.filter((attendance) => {
     const query = filter.trim().toLocaleLowerCase("id-ID");
@@ -718,6 +815,7 @@ export default function RiwayatAbsensiPage() {
                 {exporting ? "Mengunduh..." : "Unduh Rekap"}
               </Button>
             )}
+            {session?.user.role === "VM" && <Button type="button" onClick={() => setManualOpen(true)}>Catat Absensi Manual</Button>}
           </div>
         </div>
 
@@ -792,9 +890,35 @@ export default function RiwayatAbsensiPage() {
                 records={detailModal.records}
                 showName={false}
                 onPhoto={setSelectedPhoto}
+                onEdit={session?.user.role === "VM" ? handleEditRecord : undefined}
               />
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={manualOpen} onOpenChange={(open) => { if (!open && !savingManual) setManualOpen(false); }} className="max-w-xl">
+        <DialogHeader><DialogTitle>Catat Absensi Manual</DialogTitle></DialogHeader>
+        <DialogContent><form onSubmit={createManualAttendance} className="space-y-4">
+          <p className="text-sm text-muted-foreground">Gunakan saat sistem absensi mengalami kendala. Alasan pencatatan akan tersimpan di catatan absensi.</p>
+          <label className="block space-y-1 text-sm">Kantor<select required value={manualForm.office} onChange={(event) => setManualForm({ ...manualForm, office: event.target.value, userId: "" })} className="w-full rounded-md border bg-background p-2"><option value="">Pilih kantor</option>{officeOptions.map((office) => <option key={office} value={office}>{office}</option>)}</select></label>
+          <label className="block space-y-1 text-sm">Nama mitra<select required value={manualForm.userId} onChange={(event) => setManualForm({ ...manualForm, userId: event.target.value })} className="w-full rounded-md border bg-background p-2"><option value="">Pilih mitra</option>{manualMitraOptions.map((mitra) => <option key={mitra.id} value={mitra.id}>{mitra.name}</option>)}</select></label>
+          <label className="block space-y-1 text-sm">Tanggal<input required type="date" value={manualForm.date} onChange={(event) => setManualForm({ ...manualForm, date: event.target.value })} className="w-full rounded-md border bg-background p-2" /></label>
+          <label className="block space-y-1 text-sm">Kehadiran<select value={manualForm.type} onChange={(event) => setManualForm({ ...manualForm, type: event.target.value })} className="w-full rounded-md border bg-background p-2"><option value="HADIR">Hadir</option><option value="ALPHA">Tidak hadir</option></select></label>
+          <label className="block space-y-1 text-sm">Alasan<textarea required rows={3} maxLength={2000} value={manualForm.reason} onChange={(event) => setManualForm({ ...manualForm, reason: event.target.value })} className="w-full rounded-md border bg-background p-2" /></label>
+          <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={savingManual} onClick={() => setManualOpen(false)}>Batal</Button><Button type="submit" disabled={savingManual}>{savingManual ? "Menyimpan..." : "Simpan Absensi"}</Button></div>
+        </form></DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(editRecord)} onOpenChange={(open) => { if (!open && !savingEdit) setEditRecord(null); }} className="max-w-xl">
+        <DialogHeader><DialogTitle>Edit Absensi Mitra</DialogTitle></DialogHeader>
+        <DialogContent>
+          {editRecord && <form onSubmit={saveAttendanceEdit} className="space-y-4">
+            <p className="text-sm text-muted-foreground">Edit absensi tanggal {new Date(editRecord.date).toLocaleDateString("id-ID")}</p>
+            <label className="block space-y-1 text-sm">Kantor<select required value={editForm.office} onChange={(event) => setEditForm({ ...editForm, office: event.target.value, userId: "" })} className="w-full rounded-md border bg-background p-2"><option value="">Pilih kantor</option>{officeOptions.map((office) => <option key={office} value={office}>{office}</option>)}</select></label>
+            <label className="block space-y-1 text-sm">Nama mitra<select required value={editForm.userId} onChange={(event) => setEditForm({ ...editForm, userId: event.target.value })} className="w-full rounded-md border bg-background p-2"><option value="">Pilih mitra</option>{editMitraOptions.map((mitra) => <option key={mitra.id} value={mitra.id}>{mitra.name}</option>)}</select></label>
+            <label className="block space-y-1 text-sm">Kehadiran<select value={editForm.type} onChange={(event) => setEditForm({ ...editForm, type: event.target.value })} className="w-full rounded-md border bg-background p-2"><option value="HADIR">Hadir</option><option value="ALPHA">Tidak hadir</option></select></label>
+            <label className="block space-y-1 text-sm">Alasan<textarea required rows={3} maxLength={2000} value={editForm.reason} onChange={(event) => setEditForm({ ...editForm, reason: event.target.value })} className="w-full rounded-md border bg-background p-2" /></label>
+            <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={savingEdit} onClick={() => setEditRecord(null)}>Batal</Button><Button type="submit" disabled={savingEdit}>{savingEdit ? "Menyimpan..." : "Simpan Perubahan"}</Button></div>
+          </form>}
         </DialogContent>
       </Dialog>
       <Dialog
