@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getPositionCode, parseVendorServicePricing } from "@/lib/vendor-service-pricing";
 
 const DAY_RATE = 100_000;
 const parseMonth = (value: unknown) => {
@@ -54,7 +55,12 @@ export async function POST(req: NextRequest) {
       if (!invoice) return NextResponse.json({ error: "Invoice tidak ditemukan." }, { status: 404 });
       if (invoice.status !== "DRAFT") return NextResponse.json({ error: "Hanya invoice Draft yang dapat dipublikasikan." }, { status: 409 });
       const biayaVendor = invoice.biayaVendor;
-      const managementFee = Math.round(biayaVendor * invoice.managementFeeRate);
+      const detail = invoice.detailSnapshot ? JSON.parse(invoice.detailSnapshot) as { mitra?: { managementFee?: number }[] } : null;
+      const feeSnapshot = detail?.mitra;
+      const hasPerWorkerFeeSnapshot = Array.isArray(feeSnapshot) && feeSnapshot.every((worker) => typeof worker.managementFee === "number");
+      const managementFee = hasPerWorkerFeeSnapshot
+        ? feeSnapshot.reduce((sum, worker) => sum + worker.managementFee!, 0)
+        : invoice.managementFee || Math.round(biayaVendor * invoice.managementFeeRate);
       const totalKlaim = invoice.claims.reduce((sum, claim) => sum + claim.nominal, 0);
       const ppn = Math.round(managementFee * 0.11);
       const pph = Math.round(managementFee * 0.025);
@@ -67,9 +73,10 @@ export async function POST(req: NextRequest) {
     if (typeof body.vendorId !== "string" || !month) return NextResponse.json({ error: "Vendor dan bulan invoice tidak valid." }, { status: 400 });
     const start = month.start;
     const end = month.end;
-    const vendor = await prisma.vendor.findFirst({ where: { id: body.vendorId, status: "ACTIVE" }, select: { id: true, managementFeeRate: true } });
+    const vendor = await prisma.vendor.findFirst({ where: { id: body.vendorId, status: "ACTIVE" }, select: { id: true, managementFeeRate: true, servicePricing: true } });
     if (!vendor) return NextResponse.json({ error: "Vendor tidak ditemukan atau tidak aktif." }, { status: 400 });
     const monthKey = String(body.bulan);
+    const servicePricing = parseVendorServicePricing(vendor.servicePricing);
     const monthInvoices = await prisma.invoice.findMany({
       where: { vendorId: vendor.id, bulan: monthKey },
       select: { id: true, nomorInvoice: true, status: true },
@@ -108,13 +115,33 @@ export async function POST(req: NextRequest) {
       if (row.type === "HADIR") worker.days.add(ymd); else worker.absentDays.add(ymd);
       workers.set(row.userId, worker);
     }
-    const mitra = Array.from(workers.values()).map((worker) => ({ userId: worker.userId, nama: worker.name, idMitra: worker.idMitra, hub: worker.hub, role: worker.role, hariHadir: worker.days.size, hariTidakHadir: worker.absentDays.size, tarif: DAY_RATE, totalBiaya: worker.days.size * DAY_RATE }));
+    const mitra = Array.from(workers.values()).map((worker) => {
+      const positionCode = getPositionCode(worker.role);
+      const pricing = servicePricing.find((item) => item.positionCode === positionCode && item.locationCode === worker.hub);
+      const tarif = pricing?.dailyRate ?? DAY_RATE;
+      const managementFeeRate = pricing?.managementFeeRate ?? vendor.managementFeeRate;
+      const totalBiaya = worker.days.size * tarif;
+      return {
+        userId: worker.userId,
+        nama: worker.name,
+        idMitra: worker.idMitra,
+        hub: worker.hub,
+        role: worker.role,
+        hariHadir: worker.days.size,
+        hariTidakHadir: worker.absentDays.size,
+        tarif,
+        totalBiaya,
+        managementFeeRate,
+        managementFee: Math.round(totalBiaya * managementFeeRate),
+      };
+    });
     const hubs = new Map<string, { nama: string; jumlahMitra: number; totalHariKerja: number; biayaVendor: number }>();
     for (const worker of mitra) {
       const hub = hubs.get(worker.hub) || { nama: worker.hub, jumlahMitra: 0, totalHariKerja: 0, biayaVendor: 0 };
       hub.jumlahMitra += 1; hub.totalHariKerja += worker.hariHadir; hub.biayaVendor += worker.totalBiaya; hubs.set(worker.hub, hub);
     }
     const biayaVendor = mitra.reduce((sum, worker) => sum + worker.totalBiaya, 0);
+    const managementFee = mitra.reduce((sum, worker) => sum + worker.managementFee, 0);
     let sequence = (await prisma.invoice.count()) + 1;
     let nomorInvoice = `INV-${monthKey.replace("-", "")}-${String(sequence).padStart(4, "0")}`;
     while (await prisma.invoice.findUnique({ where: { nomorInvoice }, select: { id: true } })) {
@@ -122,7 +149,7 @@ export async function POST(req: NextRequest) {
       nomorInvoice = `INV-${monthKey.replace("-", "")}-${String(sequence).padStart(4, "0")}`;
     }
     const invoice = await prisma.invoice.create({ data: {
-      vendorId: vendor.id, nomorInvoice, bulan: monthKey, totalAmount: biayaVendor, status: "DRAFT", periodeMulai: start, periodeAkhir: end, biayaVendor, managementFeeRate: vendor.managementFeeRate,
+      vendorId: vendor.id, nomorInvoice, bulan: monthKey, totalAmount: biayaVendor, status: "DRAFT", periodeMulai: start, periodeAkhir: end, biayaVendor, managementFeeRate: vendor.managementFeeRate, managementFee,
       detailSnapshot: JSON.stringify({ hubs: Array.from(hubs.values()), mitra }),
     } });
     return NextResponse.json({ id: invoice.id }, { status: 201 });

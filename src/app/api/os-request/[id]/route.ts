@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getPositionCode, parseVendorPositionCodes } from "@/lib/vendor-service-pricing";
 
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -30,11 +31,14 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 
       const vendor = await prisma.vendor.findFirst({
         where: { id: vendorId, status: "ACTIVE" },
-        select: { id: true },
+        select: { id: true, availablePositionCodes: true },
       });
 
       if (!vendor) {
         return NextResponse.json({ error: "Vendor tidak ditemukan atau tidak aktif" }, { status: 400 });
+      }
+      if (!parseVendorPositionCodes(vendor.availablePositionCodes).includes(getPositionCode(osRequest.posisi))) {
+        return NextResponse.json({ error: "Vendor belum diizinkan menyediakan jabatan pada request ini. Atur jabatan vendor terlebih dahulu." }, { status: 409 });
       }
 
       const updated = await prisma.oSRequest.update({
@@ -43,6 +47,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
           vendorId,
           status: "VENDOR_SELECTED",
           vendorNotifiedAt: new Date(),
+          vendorSubmittedAt: null,
         },
       });
       return NextResponse.json(updated);

@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { MitraRosterDataIncompleteError, returnMitraToRoster } from "@/lib/mitra-roster";
+import { getPositionCode, parseVendorPositionCodes } from "@/lib/vendor-service-pricing";
 
 export async function GET(req: NextRequest) {
   try {
@@ -75,10 +76,13 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: "desc" },
     });
 
-    const response = requests.map((request) => ({
-      ...request,
-      candidates: request.candidates,
-    }));
+    const response = requests.map((request) => {
+      if (session.user.role === "VENDOR") {
+        const { vendorNotifiedAt: _vendorNotifiedAt, vendorSubmittedAt: _vendorSubmittedAt, ...vendorRequest } = request;
+        return { ...vendorRequest, candidates: request.candidates };
+      }
+      return { ...request, candidates: request.candidates };
+    });
 
     return NextResponse.json(response);
   } catch (error) {
@@ -201,6 +205,13 @@ export async function POST(req: NextRequest) {
     const effectivePosition = needsMitraId ? orderedTargetProfiles[0].posisi : posisi;
     const effectivePlacement = needsMitraId ? orderedTargetProfiles[0].penempatan : penempatan;
     const effectiveWorkHours = needsMitraId ? orderedTargetProfiles[0].waktuKerja : waktuKerja;
+
+    if (type === "PERGANTIAN" && targetVendorId) {
+      const vendor = await prisma.vendor.findUnique({ where: { id: targetVendorId }, select: { availablePositionCodes: true } });
+      if (!parseVendorPositionCodes(vendor?.availablePositionCodes).includes(getPositionCode(effectivePosition))) {
+        return NextResponse.json({ error: "Vendor belum diizinkan menyediakan jabatan Mitra OS ini. Hubungi VM untuk mengatur jabatan vendor." }, { status: 409 });
+      }
+    }
 
     const osRequest = await prisma.$transaction(async (tx) => {
       const request = await tx.oSRequest.create({

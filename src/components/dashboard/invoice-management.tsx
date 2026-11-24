@@ -8,7 +8,7 @@ import { formatCurrency } from "@/lib/utils";
 
 type Vendor = { id: string; name: string; managementFeeRate: number };
 type Claim = { id: string; jenisClaim: string; nominal: number; catatan?: string | null; createdAt: string };
-type Worker = { nama: string; idMitra: string; hub: string; role: string; hariHadir: number; hariTidakHadir: number | null; tarif: number; totalBiaya: number };
+type Worker = { nama: string; idMitra: string; hub: string; role: string; hariHadir: number; hariTidakHadir: number | null; tarif: number; totalBiaya: number; managementFeeRate?: number; managementFee?: number };
 type Hub = { nama: string; jumlahMitra: number; totalHariKerja: number; biayaVendor: number };
 type Invoice = {
   id: string; vendorId: string; nomorInvoice: string; bulan: string; totalAmount: number; biayaVendor: number; managementFeeRate: number; managementFee: number; totalKlaim: number; ppn: number; pph: number; totalTagihan: number;
@@ -24,7 +24,13 @@ async function request(url: string, method = "GET", body?: unknown) {
 }
 const dateLabel = (value?: string | null) => value ? new Date(value).toLocaleDateString("id-ID") : "-";
 const claimTotal = (invoice: Invoice) => invoice.status === "DRAFT" ? invoice.claims.reduce((sum, claim) => sum + claim.nominal, 0) : invoice.totalKlaim;
-const invoiceFee = (invoice: Invoice) => invoice.status === "DRAFT" ? Math.round(invoice.biayaVendor * invoice.managementFeeRate) : invoice.managementFee;
+const invoiceFee = (invoice: Invoice) => {
+  const workers = invoice.details?.mitra;
+  if (workers?.length && workers.every((worker) => typeof worker.managementFee === "number")) {
+    return workers.reduce((sum, worker) => sum + (worker.managementFee || 0), 0);
+  }
+  return invoice.managementFee || Math.round(invoice.biayaVendor * invoice.managementFeeRate);
+};
 const invoicePpn = (invoice: Invoice) => invoice.status === "DRAFT" ? Math.round(invoiceFee(invoice) * 0.11) : invoice.ppn;
 const invoicePph = (invoice: Invoice) => invoice.status === "DRAFT" ? Math.round(invoiceFee(invoice) * 0.025) : invoice.pph;
 const invoiceTotal = (invoice: Invoice) => invoice.status === "DRAFT"
@@ -141,13 +147,13 @@ export function InvoiceManagementPage() {
       </div>
       {selected && <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40 p-4" role="dialog" aria-modal="true"><div className="mx-auto my-8 max-w-5xl space-y-4 rounded-xl bg-background p-5 shadow-xl"><div className="flex justify-between"><h2 className="text-xl font-bold">Detail Invoice {selected.nomorInvoice}</h2><button onClick={() => setSelected(null)} aria-label="Tutup">✕</button></div><p>{selected.vendor?.name} · {dateLabel(selected.periodeMulai)} – {dateLabel(selected.periodeAkhir)} · {selected.status}</p>
         <h3 className="font-semibold">Biaya per Hub</h3><table className="w-full text-sm"><thead><tr>{["Hub", "Jumlah Mitra", "Hari Kerja", "Biaya"].map(x => <th className="p-2 text-left" key={x}>{x}</th>)}</tr></thead><tbody>{selected.details?.hubs.map(h => <tr className="border-t" key={h.nama}><td className="p-2">{h.nama}</td><td className="p-2">{h.jumlahMitra}</td><td className="p-2">{h.totalHariKerja}</td><td className="p-2">{formatCurrency(h.biayaVendor)}</td></tr>)}</tbody></table>
-        <h3 className="font-semibold">Rincian Mitra</h3><div className="max-h-56 overflow-auto"><table className="w-full text-sm"><thead><tr>{["Nama", "ID", "Hub", "Role", "Hari Hadir", "Tidak Hadir", "Tarif", "Total"].map(x => <th className="p-2 text-left" key={x}>{x}</th>)}</tr></thead><tbody>{selected.details?.mitra.map(m => <tr className="border-t" key={m.idMitra + m.nama}><td className="p-2">{m.nama}</td><td className="p-2">{m.idMitra}</td><td className="p-2">{m.hub}</td><td className="p-2">{m.role}</td><td className="p-2">{m.hariHadir}</td><td className="p-2">{m.hariTidakHadir ?? "-"}</td><td className="p-2">{formatCurrency(m.tarif)}</td><td className="p-2">{formatCurrency(m.totalBiaya)}</td></tr>)}</tbody></table></div>
+        <h3 className="font-semibold">Rincian Mitra</h3><div className="max-h-56 overflow-auto"><table className="w-full text-sm"><thead><tr>{["Nama", "ID", "Kantor", "Jabatan", "Hari Hadir", "Tidak Hadir", "Tarif/Hari", "Total Biaya", "Management Fee"].map(x => <th className="p-2 text-left" key={x}>{x}</th>)}</tr></thead><tbody>{selected.details?.mitra.map(m => <tr className="border-t" key={m.idMitra + m.nama}><td className="p-2">{m.nama}</td><td className="p-2">{m.idMitra}</td><td className="p-2">{m.hub}</td><td className="p-2">{m.role}</td><td className="p-2">{m.hariHadir}</td><td className="p-2">{m.hariTidakHadir ?? "-"}</td><td className="p-2">{formatCurrency(m.tarif)}</td><td className="p-2">{formatCurrency(m.totalBiaya)}</td><td className="whitespace-nowrap p-2">{m.managementFeeRate != null ? `${(m.managementFeeRate * 100).toLocaleString("id-ID")} % · ` : ""}{formatCurrency(m.managementFee ?? 0)}</td></tr>)}</tbody></table></div>
         <div className="flex items-center justify-between"><h3 className="font-semibold">Data Klaim (Versi final akan disambungkan ke Mobile)</h3><Button size="sm" variant="outline" onClick={() => downloadClaims(selected)}>Unduh Data Klaim</Button></div><table className="w-full text-sm"><thead><tr>{["Tanggal", "Jenis", "Keterangan", "Nominal"].map(x => <th className="p-2 text-left" key={x}>{x}</th>)}</tr></thead><tbody>{selected.claims.map(c => <tr className="border-t" key={c.id}><td className="p-2">{dateLabel(c.createdAt)}</td><td className="p-2">{c.jenisClaim}</td><td className="p-2">{c.catatan || "-"}</td><td className="p-2"><div className="flex items-center justify-between gap-3"><span>{formatCurrency(c.nominal)}</span>{isFinance && selected.status === "DRAFT" && <Button type="button" size="sm" variant="destructive" disabled={busy} className="h-6 w-6 rounded-full p-0 text-base leading-none" aria-label={`Hapus klaim ${c.jenisClaim}`} title="Hapus klaim" onClick={() => void deleteClaim(c)}>−</Button>}</div></td></tr>)}</tbody></table>
         <section className="ml-auto max-w-lg border-t pt-3 text-sm">
           <h3 className="mb-2 font-bold">RINGKASAN TAGIHAN</h3>
           <div className="grid grid-cols-[1fr_auto] gap-x-8 gap-y-1">
             <span>Biaya Vendor</span><strong className="text-right">{formatCurrency(selected.biayaVendor)}</strong>
-            <span>Management Fee ({(selected.managementFeeRate * 100).toLocaleString("id-ID")}%)</span><strong className="text-right">{formatCurrency(invoiceFee(selected))}</strong>
+            <span>Management Fee (sesuai jabatan dan kantor)</span><strong className="text-right">{formatCurrency(invoiceFee(selected))}</strong>
             <span>PPN (11% dari Management Fee)</span><strong className="text-right">{formatCurrency(invoicePpn(selected))}</strong>
             <span>PPh (2,5% dari Management Fee)</span><strong className="text-right">− {formatCurrency(invoicePph(selected))}</strong>
             <span>Total Klaim</span><strong className="text-right">− {formatCurrency(claimTotal(selected))}</strong>
@@ -173,7 +179,7 @@ export function InvoiceManagementPage() {
         <table className="print-table"><thead><tr><th>Keterangan</th><th>Jumlah Mitra</th><th>Hari Kerja</th><th>Biaya Vendor</th></tr></thead><tbody>
           {invoiceToPrint.details?.hubs?.length ? invoiceToPrint.details.hubs.map(hub => <tr key={hub.nama}><td>Layanan outsourcing – {hub.nama}</td><td>{hub.jumlahMitra}</td><td>{hub.totalHariKerja}</td><td>{formatCurrency(hub.biayaVendor)}</td></tr>) : <tr><td>Layanan outsourcing</td><td>{invoiceToPrint.details?.mitra.length ?? 0}</td><td>{invoiceToPrint.details?.mitra.reduce((sum, mitra) => sum + mitra.hariHadir, 0) ?? 0}</td><td>{formatCurrency(invoiceToPrint.biayaVendor)}</td></tr>}
         </tbody></table>
-        <section className="print-summary"><h2>RINGKASAN TAGIHAN</h2><p><span>Biaya Vendor</span><strong>{formatCurrency(invoiceToPrint.biayaVendor)}</strong></p><p><span>Management Fee ({(invoiceToPrint.managementFeeRate * 100).toLocaleString("id-ID")}%)</span><strong>{formatCurrency(invoiceFee(invoiceToPrint))}</strong></p><p><span>PPN (11% dari Management Fee)</span><strong>{formatCurrency(invoicePpn(invoiceToPrint))}</strong></p><p><span>PPh (2,5% dari Management Fee)</span><strong>− {formatCurrency(invoicePph(invoiceToPrint))}</strong></p><p><span>Total Klaim</span><strong>− {formatCurrency(claimTotal(invoiceToPrint))}</strong></p><p className="print-total"><span>TOTAL TAGIHAN</span><strong>{formatCurrency(invoiceTotal(invoiceToPrint))}</strong></p></section>
+        <section className="print-summary"><h2>RINGKASAN TAGIHAN</h2><p><span>Biaya Vendor</span><strong>{formatCurrency(invoiceToPrint.biayaVendor)}</strong></p><p><span>Management Fee (sesuai jabatan dan kantor)</span><strong>{formatCurrency(invoiceFee(invoiceToPrint))}</strong></p><p><span>PPN (11% dari Management Fee)</span><strong>{formatCurrency(invoicePpn(invoiceToPrint))}</strong></p><p><span>PPh (2,5% dari Management Fee)</span><strong>− {formatCurrency(invoicePph(invoiceToPrint))}</strong></p><p><span>Total Klaim</span><strong>− {formatCurrency(claimTotal(invoiceToPrint))}</strong></p><p className="print-total"><span>TOTAL TAGIHAN</span><strong>{formatCurrency(invoiceTotal(invoiceToPrint))}</strong></p></section>
         {invoiceToPrint.claims.length > 0 && <section className="print-claims"><h2>RINCIAN KLAIM</h2>{invoiceToPrint.claims.map(claim => <p key={claim.id}><span>{claim.jenisClaim}{claim.catatan ? ` — ${claim.catatan}` : ""}</span><strong>{formatCurrency(claim.nominal)}</strong></p>)}</section>}
         <footer className="print-footer">Invoice ini diterbitkan oleh Wahana untuk rincian tagihan layanan outsourcing pada periode tersebut.</footer>
       </article>}

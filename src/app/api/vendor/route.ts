@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import bcrypt from "bcryptjs";
 import { decryptInitialPassword, encryptInitialPassword, generateInitialPassword } from "@/lib/initial-password";
+import { parseVendorPositionCodes, parseVendorServicePricing, VENDOR_LOCATIONS, VENDOR_POSITIONS } from "@/lib/vendor-service-pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,8 @@ export async function GET() {
         const vendorUser = users[0] ?? null;
         return {
           ...vendor,
+          availablePositionCodes: parseVendorPositionCodes(vendor.availablePositionCodes),
+          servicePricing: parseVendorServicePricing(vendor.servicePricing),
           initialUsername: vendorUser?.email || vendor.email || null,
           initialPassword: vendorUser?.initialPasswordEncrypted
             ? decryptInitialPassword(vendorUser.initialPasswordEncrypted)
@@ -56,7 +59,11 @@ export async function GET() {
       orderBy: { name: "asc" },
     });
 
-    return NextResponse.json(vendors);
+    return NextResponse.json(vendors.map((vendor) => ({
+      ...vendor,
+      availablePositionCodes: parseVendorPositionCodes(vendor.availablePositionCodes),
+      servicePricing: parseVendorServicePricing(vendor.servicePricing),
+    })));
   } catch (error) {
     console.error("Vendor GET error:", error);
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
@@ -168,6 +175,57 @@ export async function PATCH(req: NextRequest) {
       const vendor = await prisma.vendor.findUnique({ where: { id: vendorId }, select: { id: true } });
       if (!vendor) return NextResponse.json({ error: "Vendor tidak ditemukan." }, { status: 404 });
       return NextResponse.json(await prisma.vendor.update({ where: { id: vendorId }, data: { managementFeeRate: rate } }));
+    }
+
+    if (action === "SAVE_SERVICE_SETTINGS") {
+      const availablePositionCodes: unknown = body.availablePositionCodes;
+      const servicePricing: unknown = body.servicePricing;
+      const validPositionCodes = new Set<string>(VENDOR_POSITIONS.map((position) => position.code));
+      const validLocations = new Set<string>(VENDOR_LOCATIONS);
+      if (!vendorId || !Array.isArray(availablePositionCodes) || !Array.isArray(servicePricing)) {
+        return NextResponse.json({ error: "Data jabatan dan tarif vendor tidak valid." }, { status: 400 });
+      }
+      if (
+        availablePositionCodes.some((code) => typeof code !== "string" || !validPositionCodes.has(code))
+        || new Set(availablePositionCodes).size !== availablePositionCodes.length
+      ) {
+        return NextResponse.json({ error: "Daftar kode jabatan tidak valid." }, { status: 400 });
+      }
+      const normalizedPricing: { positionCode: string; locationCode: string; dailyRate: number; managementFeeRate: number }[] = [];
+      const pricingKeys = new Set<string>();
+      for (const item of servicePricing) {
+        if (!item || typeof item !== "object") return NextResponse.json({ error: "Data tarif vendor tidak valid." }, { status: 400 });
+        const price = item as Record<string, unknown>;
+        if (
+          typeof price.positionCode !== "string" || !validPositionCodes.has(price.positionCode)
+          || typeof price.locationCode !== "string" || !validLocations.has(price.locationCode)
+          || typeof price.dailyRate !== "number" || !Number.isFinite(price.dailyRate) || price.dailyRate < 0 || price.dailyRate > 1_000_000_000
+          || typeof price.managementFeeRate !== "number" || !Number.isFinite(price.managementFeeRate) || price.managementFeeRate < 0 || price.managementFeeRate > 1
+        ) return NextResponse.json({ error: "Tarif harus Rp0–Rp1.000.000.000 dan management fee 0–100%." }, { status: 400 });
+        const key = `${price.positionCode}:${price.locationCode}`;
+        if (pricingKeys.has(key)) return NextResponse.json({ error: "Jabatan dan lokasi tarif tidak boleh duplikat." }, { status: 400 });
+        pricingKeys.add(key);
+        normalizedPricing.push({
+          positionCode: price.positionCode,
+          locationCode: price.locationCode,
+          dailyRate: price.dailyRate,
+          managementFeeRate: price.managementFeeRate,
+        });
+      }
+      const exists = await prisma.vendor.findUnique({ where: { id: vendorId }, select: { id: true } });
+      if (!exists) return NextResponse.json({ error: "Vendor tidak ditemukan." }, { status: 404 });
+      const updated = await prisma.vendor.update({
+        where: { id: vendorId },
+        data: {
+          availablePositionCodes: JSON.stringify(availablePositionCodes),
+          servicePricing: JSON.stringify(normalizedPricing),
+        },
+      });
+      return NextResponse.json({
+        ...updated,
+        availablePositionCodes: parseVendorPositionCodes(updated.availablePositionCodes),
+        servicePricing: parseVendorServicePricing(updated.servicePricing),
+      });
     }
 
     const reason = typeof body.reason === "string" ? body.reason.trim() : "";

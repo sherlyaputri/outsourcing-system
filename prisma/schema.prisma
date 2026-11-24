@@ -33,23 +33,25 @@ model User {
 }
 
 model Vendor {
-  id                 String    @id @default(cuid())
-  name               String
-  address            String?   @db.Text
-  phone              String?
-  email              String?
-  npwp               String?
-  picName            String?
-  picPhone           String?
-  bankAccountName    String?
-  bankAccountNumber  String?
-  companyTaxStatus   String?
-  managementFeeRate  Float     @default(0.035)
-  status             String    @default("PENDING") // PENDING, ACTIVE, INACTIVE
-  removalReason      String?   @db.Text
-  removedAt          DateTime?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @default(now()) @updatedAt
+  id                     String    @id @default(cuid())
+  name                   String
+  address                String?   @db.Text
+  phone                  String?
+  email                  String?
+  npwp                   String?
+  picName                String?
+  picPhone               String?
+  bankAccountName        String?
+  bankAccountNumber      String?
+  companyTaxStatus       String?
+  managementFeeRate      Float     @default(0.035)
+  availablePositionCodes String?   @db.Text
+  servicePricing         String?   @db.LongText
+  status                 String    @default("PENDING") // PENDING, ACTIVE, INACTIVE
+  removalReason          String?   @db.Text
+  removedAt              DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @default(now()) @updatedAt
 
   users         User[]
   mitraProfiles MitraProfile[]
@@ -139,25 +141,26 @@ model Attendance {
 }
 
 model OSRequest {
-  id               String    @id @default(cuid())
-  type             String // PENAMBAHAN, PERGANTIAN, PENGURANGAN
-  status           String    @default("PENDING") // PENDING, APPROVED_GM, APPROVED_COO, VENDOR_SELECTED, WAITING_SELECTION, WAITING_ACTIVATION, NOT_SELECTED, COMPLETED, REJECTED
-  requesterId      String
-  requester        User      @relation("OSRequestCreator", fields: [requesterId], references: [id])
-  vendorId         String?
-  vendor           Vendor?   @relation("OSRequestVendor", fields: [vendorId], references: [id])
-  vendorNotifiedAt DateTime?
-  jumlah           Int       @default(1)
-  idPergantian     String?
-  idMitraOs        String?
-  mitraTargets     Json?
-  posisi           String?
-  penempatan       String?
-  waktuKerja       String?
-  alasan           String?   @db.Text
-  catatan          String?   @db.Text
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  id                String    @id @default(cuid())
+  type              String // PENAMBAHAN, PERGANTIAN, PENGURANGAN
+  status            String    @default("PENDING") // PENDING, APPROVED_GM, APPROVED_COO, VENDOR_SELECTED, WAITING_SELECTION, WAITING_ACTIVATION, NOT_SELECTED, COMPLETED, REJECTED
+  requesterId       String
+  requester         User      @relation("OSRequestCreator", fields: [requesterId], references: [id])
+  vendorId          String?
+  vendor            Vendor?   @relation("OSRequestVendor", fields: [vendorId], references: [id])
+  vendorNotifiedAt  DateTime?
+  vendorSubmittedAt DateTime?
+  jumlah            Int       @default(1)
+  idPergantian      String?
+  idMitraOs         String?
+  mitraTargets      Json?
+  posisi            String?
+  penempatan        String?
+  waktuKerja        String?
+  alasan            String?   @db.Text
+  catatan           String?   @db.Text
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   approvals  Approval[]
   candidates Candidate[]
@@ -295,38 +298,38 @@ model Claim {
 }
 
 model Invoice {
-  id                String    @id @default(cuid())
-  vendorId          String
-  vendor            Vendor    @relation(fields: [vendorId], references: [id])
-  nomorInvoice      String    @unique
-  bulan             String // format: YYYY-MM
-  totalAmount       Float
-  status            String    @default("DRAFT") // DRAFT, SUBMITTED, VERIFIED, PAID
-  tanggalJatuhTempo DateTime?
-  catatan           String?   @db.Text
-  dokumen           String?   @db.LongText
-  dokumenNama       String?
-  buktiTransfer     String?   @db.LongText
-  buktiTransferNama String?
-  periodeMulai      DateTime?
-  periodeAkhir      DateTime?
-  detailSnapshot    String?   @db.LongText
-  biayaVendor       Float     @default(0)
-  managementFeeRate Float     @default(0.035)
-  managementFee     Float     @default(0)
-  totalKlaim        Float     @default(0)
-  ppn               Float     @default(0)
-  pph               Float     @default(0)
-  totalTagihan      Float     @default(0)
-  statusPembayaran String    @default("UNPAID")
-  nominalPembayaran Float?
-  tanggalPembayaran DateTime?
-  catatanPembayaran String?   @db.Text
-  publishedAt       DateTime?
-  cancelledAt       DateTime?
-  cancellationReason String?  @db.Text
-  changeHistory     String?   @db.LongText
-  claims            Claim[]
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  id                 String    @id @default(cuid())
+  vendorId           String
+  vendor             Vendor    @relation(fields: [vendorId], references: [id])
+  nomorInvoice       String    @unique
+  bulan              String // format: YYYY-MM
+  totalAmount        Float
+  status             String    @default("DRAFT") // DRAFT, SUBMITTED, VERIFIED, PAID
+  tanggalJatuhTempo  DateTime?
+  catatan            String?   @db.Text
+  dokumen            String?   @db.LongText
+  dokumenNama        String?
+  buktiTransfer      String?   @db.LongText
+  buktiTransferNama  String?
+  periodeMulai       DateTime?
+  periodeAkhir       DateTime?
+  detailSnapshot     String?   @db.LongText
+  biayaVendor        Float     @default(0)
+  managementFeeRate  Float     @default(0.035)
+  managementFee      Float     @default(0)
+  totalKlaim         Float     @default(0)
+  ppn                Float     @default(0)
+  pph                Float     @default(0)
+  totalTagihan       Float     @default(0)
+  statusPembayaran   String    @default("UNPAID")
+  nominalPembayaran  Float?
+  tanggalPembayaran  DateTime?
+  catatanPembayaran  String?   @db.Text
+  publishedAt        DateTime?
+  cancelledAt        DateTime?
+  cancellationReason String?   @db.Text
+  changeHistory      String?   @db.LongText
+  claims             Claim[]
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 }

@@ -12,6 +12,7 @@ import { DEFAULT_PAGE_SIZE, TablePagination } from "@/components/ui/table-pagina
 import { FileText, User, Mail, Phone, MapPin, Briefcase, CreditCard, Shield, ExternalLink, Calendar, Edit, Eye, Check, Upload, Search, RotateCcw, Copy, KeyRound } from "lucide-react";
 import { cn, formatCurrency, formatDate, getStatusLabel } from "@/lib/utils";
 import { InvoiceManagementPage } from "@/components/dashboard/invoice-management";
+import { getPositionCode, VENDOR_LOCATIONS, VENDOR_POSITIONS, type VendorServicePrice } from "@/lib/vendor-service-pricing";
 
 interface ApiState<T> {
   data: T;
@@ -34,6 +35,8 @@ interface Vendor {
   bankAccountNumber?: string | null;
   companyTaxStatus?: string | null;
   managementFeeRate: number;
+  availablePositionCodes?: string[];
+  servicePricing?: VendorServicePrice[];
   initialUsername?: string | null;
   initialPassword?: string | null;
   removalReason?: string | null;
@@ -290,6 +293,7 @@ interface OSRequest {
   catatan?: string | null;
   vendorId?: string | null;
   vendorNotifiedAt?: string | null;
+  vendorSubmittedAt?: string | null;
   createdAt?: string;
   updatedAt?: string;
   requester?: { name: string; role: string };
@@ -2457,16 +2461,49 @@ export function VendorManagementPage() {
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [serviceSettings, setServiceSettings] = useState<{ vendorId: string; availablePositionCodes: string[]; servicePricing: VendorServicePrice[] } | null>(null);
+  const [selectedPricingOffice, setSelectedPricingOffice] = useState("");
 
-  async function updateManagementFee(vendor: Vendor, rate: number) {
+  function openVendorDetails(vendor: Vendor) {
+    const savedPricing = vendor.servicePricing || [];
+    setDetailVendor(vendor);
+    setError(null);
+    setSelectedPricingOffice("");
+    setServiceSettings({
+      vendorId: vendor.id,
+      availablePositionCodes: vendor.availablePositionCodes || [],
+      servicePricing: VENDOR_POSITIONS.flatMap((position) => VENDOR_LOCATIONS.map((location) =>
+        savedPricing.find((rate) => rate.positionCode === position.code && rate.locationCode === location)
+        || { positionCode: position.code, locationCode: location, dailyRate: 100_000, managementFeeRate: vendor.managementFeeRate ?? 0.035 },
+      )),
+    });
+  }
+
+  function updateVendorPricing(positionCode: string, locationCode: string, field: "dailyRate" | "managementFeeRate", value: number) {
+    setServiceSettings((current) => current ? {
+      ...current,
+      servicePricing: current.servicePricing.map((rate) => rate.positionCode === positionCode && rate.locationCode === locationCode
+        ? { ...rate, [field]: value }
+        : rate),
+    } : current);
+  }
+
+  async function saveVendorServiceSettings() {
+    if (!serviceSettings) return;
     setError(null);
     setSaving(true);
     try {
-      const updated = await sendJson("/api/vendor", "PATCH", { action: "UPDATE_MANAGEMENT_FEE", vendorId: vendor.id, managementFeeRate: rate });
-      setDetailVendor((current) => current?.id === vendor.id ? { ...current, ...updated } : current);
+      const updated = await sendJson("/api/vendor", "PATCH", {
+        action: "SAVE_SERVICE_SETTINGS",
+        vendorId: serviceSettings.vendorId,
+        availablePositionCodes: serviceSettings.availablePositionCodes,
+        servicePricing: serviceSettings.servicePricing,
+      });
+      setDetailVendor((current) => current?.id === serviceSettings.vendorId ? { ...current, ...updated } : current);
+      setServiceSettings({ ...serviceSettings, availablePositionCodes: updated.availablePositionCodes, servicePricing: updated.servicePricing });
       vendors.reload();
     } catch (updateError) {
-      setError(updateError instanceof Error ? updateError.message : "Gagal menyimpan management fee.");
+      setError(updateError instanceof Error ? updateError.message : "Gagal menyimpan pengaturan role dan tarif.");
     } finally { setSaving(false); }
   }
 
@@ -2554,7 +2591,7 @@ export function VendorManagementPage() {
                 <TableCell><StatusBadge status={vendor.status} /></TableCell>
                 <TableCell>
                   <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" onClick={() => setDetailVendor(vendor)}>Detail</Button>
+                    <Button size="sm" variant="outline" onClick={() => openVendorDetails(vendor)}>Detail</Button>
                     {vendor.status === "PENDING" && <Button size="sm" className="bg-blue-600 hover:bg-blue-700" disabled={saving} onClick={() => generateVendorCredentials(vendor)}>Generate Kredensial</Button>}
                     {vendor.status === "ACTIVE" ? (
                     <Button size="sm" variant="outline" onClick={() => {
@@ -2579,7 +2616,7 @@ export function VendorManagementPage() {
             </div>
             <p className="mt-2 text-xs text-muted-foreground">Mitra OS: {vendor._count?.users || 0}</p>
             <div className="mt-3 flex flex-wrap gap-2">
-              <Button size="sm" variant="outline" onClick={() => setDetailVendor(vendor)}>Detail Vendor</Button>
+              <Button size="sm" variant="outline" onClick={() => openVendorDetails(vendor)}>Detail Vendor</Button>
               {vendor.status === "PENDING" && <Button size="sm" className="bg-blue-600 hover:bg-blue-700" disabled={saving} onClick={() => generateVendorCredentials(vendor)}>Generate Kredensial</Button>}
               {vendor.status === "ACTIVE" && <Button size="sm" variant="outline" onClick={() => setSelectedVendor(vendor)}>Tandai Tidak Digunakan</Button>}
             </div>
@@ -2596,41 +2633,61 @@ export function VendorManagementPage() {
           <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={saving} onClick={() => setShowCreateVendor(false)}>Batal</Button><Button type="submit" disabled={saving}>{saving ? "Menyimpan..." : "Submit"}</Button></div>
         </form></DialogContent>
       </Dialog>}
-      {detailVendor && <Dialog open onOpenChange={(open) => { if (!open) setDetailVendor(null); }}>
+      {detailVendor && <Dialog open onOpenChange={(open) => { if (!open) { setDetailVendor(null); setServiceSettings(null); } }}>
         <DialogHeader><DialogTitle>Detail Data Vendor</DialogTitle></DialogHeader>
         <DialogContent><div className="grid gap-3 text-sm sm:grid-cols-2">
           <p>Nama Vendor: <strong>{detailVendor.name}</strong></p><p>Status: <StatusBadge status={detailVendor.status} /></p>
           <p>Email: <strong>{detailVendor.email || "-"}</strong></p><p>No. Telepon: <strong>{detailVendor.phone || "-"}</strong></p>
           <p>Jumlah Mitra OS: <strong>{detailVendor._count?.users || 0}</strong></p>
-          <label className="flex items-center gap-2">Management fee
-            <span className="flex items-center gap-2">
-              <input
-                aria-label="Management fee vendor dalam persen"
-                className={`${fieldClass} w-24`}
-                type="number"
-                min="3.5"
-                max="4"
-                step="0.1"
-                defaultValue={((detailVendor.managementFeeRate ?? 0.035) * 100).toFixed(1)}
-                disabled={saving}
-                onBlur={(event) => {
-                  const percentage = Number(event.currentTarget.value);
-                  if (Number.isFinite(percentage) && percentage >= 3.5 && percentage <= 4) {
-                    void updateManagementFee(detailVendor, percentage / 100);
-                  } else {
-                    setError("Management fee harus antara 3,5% dan 4%.");
-                  }
-                }}
-              />
-              <span>%</span>
-            </span>
-          </label>
           <p>Alamat: <strong>{detailVendor.address || "-"}</strong></p><p>NPWP: <strong>{detailVendor.npwp || "-"}</strong></p>
           <p>Nama PIC: <strong>{detailVendor.picName || "-"}</strong></p><p>No. HP PIC: <strong>{detailVendor.picPhone || "-"}</strong></p>
           <p>Status pajak: <strong>{detailVendor.companyTaxStatus === "NON_PKP" ? "Non-PKP" : detailVendor.companyTaxStatus || "-"}</strong></p>
           <p>Nama rekening: <strong>{detailVendor.bankAccountName || "-"}</strong></p><p>No. rekening: <strong>{detailVendor.bankAccountNumber || "-"}</strong></p>
           {detailVendor.removalReason && <p className="sm:col-span-2">Alasan tidak digunakan: <strong>{detailVendor.removalReason}</strong></p>}
           {detailVendor.initialPassword && <div className="rounded-md border border-blue-200 bg-blue-50 p-4 sm:col-span-2"><h3 className="mb-2 font-semibold">Kredensial Vendor OS</h3><p>Username: <strong>{detailVendor.initialUsername || detailVendor.email}</strong></p><p>Password awal: <code className="break-all">{detailVendor.initialPassword}</code></p><p className="mt-2 text-xs text-muted-foreground">Kredensial tersedia sampai Vendor mengganti password pertamanya.</p></div>}
+          {serviceSettings && <section className="space-y-4 border-t pt-4 sm:col-span-2">
+            <div>
+              <h3 className="font-semibold">Jabatan yang boleh disediakan vendor</h3>
+              <p className="text-xs text-muted-foreground">VM menentukan pilihan jabatan yang tersedia untuk vendor ini.</p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                {VENDOR_POSITIONS.map((position) => <label key={position.code} className="flex items-center gap-2 rounded-md border p-2">
+                  <input type="checkbox" checked={serviceSettings.availablePositionCodes.includes(position.code)} disabled={saving} onChange={(event) => setServiceSettings((current) => current ? {
+                    ...current,
+                    availablePositionCodes: event.target.checked
+                      ? [...current.availablePositionCodes, position.code]
+                      : current.availablePositionCodes.filter((code) => code !== position.code),
+                  } : current)} />
+                  <span>{position.code}: {position.label}</span>
+                </label>)}
+              </div>
+            </div>
+            <div>
+              <h3 className="font-semibold">Tarif Mitra OS dan management fee</h3>
+              <p className="text-xs text-muted-foreground">Tarif dihitung per hari hadir. Management fee diterapkan pada total biaya per orang menurut jabatan dan kantor.</p>
+              <label className="mt-3 block max-w-xs space-y-1 text-sm">Kantor
+                <select className={fieldClass} value={selectedPricingOffice} disabled={saving} onChange={(event) => setSelectedPricingOffice(event.target.value)}>
+                  <option value="">Pilih kantor</option><option value="ALL">Semua kantor</option>
+                  {VENDOR_LOCATIONS.map((location) => <option key={location} value={location}>{location}</option>)}
+                </select>
+              </label>
+              {selectedPricingOffice && <div className="mt-2 max-h-80 overflow-auto rounded-md border">
+                <table className="w-full min-w-[620px] text-left text-sm">
+                  <thead className="sticky top-0 bg-muted"><tr><th className="p-2">Jabatan</th>{selectedPricingOffice === "ALL" && <th className="p-2">Kantor</th>}<th className="p-2">Tarif per hari (Rp)</th><th className="p-2">Management fee (%)</th></tr></thead>
+                  <tbody>{VENDOR_POSITIONS.flatMap((position) => VENDOR_LOCATIONS.filter((location) => selectedPricingOffice === "ALL" || location === selectedPricingOffice).map((location) => {
+                    const rate = serviceSettings.servicePricing.find((item) => item.positionCode === position.code && item.locationCode === location)!;
+                    const enabled = serviceSettings.availablePositionCodes.includes(position.code);
+                    return <tr className="border-t" key={`${position.code}-${location}`}>
+                      <td className="p-2">{position.code}: {position.label}</td>{selectedPricingOffice === "ALL" && <td className="p-2">{location}</td>}
+                      <td className="p-2"><input aria-label={`Tarif ${position.code} ${location}`} className={`${fieldClass} w-36`} type="number" min="0" step="1000" value={rate.dailyRate} disabled={!enabled || saving} onChange={(event) => updateVendorPricing(position.code, location, "dailyRate", Number(event.target.value))} /></td>
+                      <td className="p-2"><div className="flex items-center gap-1"><input aria-label={`Management fee ${position.code} ${location}`} className={`${fieldClass} w-24`} type="number" min="0" max="100" step="0.01" value={Number((rate.managementFeeRate * 100).toFixed(2)).toString()} disabled={!enabled || saving} onChange={(event) => updateVendorPricing(position.code, location, "managementFeeRate", Number(event.target.value) / 100)} /><span>%</span></div></td>
+                    </tr>;
+                  }) )}</tbody>
+                </table>
+              </div>}
+            </div>
+            <FormError error={error} />
+            <div className="flex justify-end"><Button type="button" disabled={saving} onClick={() => void saveVendorServiceSettings()}>{saving ? "Menyimpan..." : "Simpan Pengaturan Vendor"}</Button></div>
+          </section>}
         </div></DialogContent>
       </Dialog>}
       {selectedVendor && (
@@ -2692,10 +2749,6 @@ function VendorCandidateForm({
     .map((candidate) => candidate.replacementMitraProfileId!));
   const availableReplacementTargets = (request.mitraTargets || []).filter((id) => !filledReplacementTargets.has(id));
   const initialCandidateCount = request.type === "PERGANTIAN" ? availableReplacementTargets.length : 1;
-  const vendorEntryDeadline = request.type === "PERGANTIAN"
-    ? new Date(new Date(request.updatedAt || request.createdAt || Date.now()).getTime() + 2 * 60 * 60 * 1000)
-    : null;
-  const vendorEntryExpired = Boolean(vendorEntryDeadline && vendorEntryDeadline.getTime() < Date.now());
   const [candidates, setCandidates] = useState<CandidateSubmissionDraft[]>(
     Array.from({ length: initialCandidateCount }, () => ({
       ...emptyCandidate(),
@@ -2721,10 +2774,6 @@ function VendorCandidateForm({
     }
     if (request.type === "PERGANTIAN" && candidates.length !== availableReplacementTargets.length) {
       setError("Jumlah kandidat harus sama dengan jumlah Mitra OS yang masih perlu diganti.");
-      return;
-    }
-    if (vendorEntryExpired) {
-      setError("Batas waktu pengisian kandidat pergantian (2 jam) telah berakhir.");
       return;
     }
     if (candidates.some((candidate) => candidate.source === "EMPLOYEE" && !candidate.employeeId)) {
@@ -2839,7 +2888,6 @@ function VendorCandidateForm({
           <p>Wilayah Operasional: <strong>{request.penempatan || "-"}</strong></p>
           <p>Waktu Kerja: <strong>{request.waktuKerja || "-"}</strong></p>
           <p>Kandidat diajukan: <strong>{candidates.length}</strong></p>
-          {vendorEntryDeadline && <p className="text-amber-700 sm:col-span-2">Batas pengisian data: <strong>{vendorEntryDeadline.toLocaleString("id-ID")}</strong> (maksimal 2 jam).</p>}
         </div>
         <form onSubmit={submit} className="space-y-6">
           {candidates.map((candidate, index) => (
@@ -3001,7 +3049,7 @@ function VendorCandidateForm({
               )}
               <Button type="button" variant="outline" disabled={saving} onClick={onClose}>Tutup</Button>
             </div>
-            <Button type="submit" disabled={saving || vendorEntryExpired || candidates.length < 1 || candidates.length > 10}>
+            <Button type="submit" disabled={saving || candidates.length < 1 || candidates.length > 10}>
               {saving ? "Mengirim..." : "Submit"}
             </Button>
           </div>
@@ -3632,6 +3680,7 @@ export function OSRequestPage() {
     "Waktu Kerja",
     "Pemohon",
     "Vendor",
+    ...(["VM", "SM"].includes(session?.user.role || "") ? ["Durasi Vendor"] : []),
     "Status",
     "Detail",
     ...(session?.user.role === "VENDOR" ? ["Aksi"] : []),
@@ -3640,6 +3689,11 @@ export function OSRequestPage() {
     <DataTable headers={tableHeaders}>
       {items.map((item) => {
         const targetMitras = resolveMitraTargets(item);
+        const eligibleVendors = vendors.data.filter((vendor) => vendor.status === "ACTIVE" && (vendor.availablePositionCodes || []).includes(getPositionCode(item.posisi)));
+        const durationStarted = item.vendorNotifiedAt ? new Date(item.vendorNotifiedAt).getTime() : null;
+        const durationEnded = item.vendorSubmittedAt ? new Date(item.vendorSubmittedAt).getTime() : Date.now();
+        const elapsedMinutes = durationStarted ? Math.max(0, Math.floor((durationEnded - durationStarted) / 60_000)) : null;
+        const durationLabel = elapsedMinutes === null ? "-" : `${Math.floor(elapsedMinutes / 60)} jam ${elapsedMinutes % 60} menit${item.vendorSubmittedAt ? "" : " · Menunggu submit"}`;
         return (
           <TableRow key={item.id}>
             <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString("id-ID") : "-"}</TableCell>
@@ -3661,7 +3715,8 @@ export function OSRequestPage() {
                     onChange={(event) => setSelectedVendors({ ...selectedVendors, [item.id]: event.target.value })}
                   >
                     <option value="">Pilih vendor</option>
-                    {vendors.data.filter((vendor) => vendor.status === "ACTIVE").map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
+                    {eligibleVendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}
+                    {!eligibleVendors.length && <option disabled value="">Atur jabatan vendor di Data Vendor</option>}
                   </select>
                   <Button disabled={assigningId === item.id || vendors.loading} onClick={() => assignVendor(item.id)}>
                     {assigningId === item.id ? "Menyimpan..." : "Pilih"}
@@ -3669,6 +3724,7 @@ export function OSRequestPage() {
                 </div>
               ) : item.vendor?.name || "-"}
             </TableCell>
+            {(["VM", "SM"].includes(session?.user.role || "")) && <TableCell className="whitespace-nowrap">{durationLabel}</TableCell>}
             <TableCell><StatusBadge status={getOSRequestStatus(item.status)} /></TableCell>
             <TableCell>
               {session?.user.role === "SM" && getOSRequestStatus(item.status) === "OS_WAITING_SELECTION" ? (

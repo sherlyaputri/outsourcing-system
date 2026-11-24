@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { Prisma } from "@prisma/client";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getPositionCode, parseVendorPositionCodes } from "@/lib/vendor-service-pricing";
 
 class CandidateQuotaReachedError extends Error {}
 class VendorEmployeeUnavailableError extends Error {}
@@ -153,14 +154,15 @@ export async function POST(req: NextRequest) {
         vendorId,
         status: "VENDOR_SELECTED",
       },
-      select: { id: true, jumlah: true, type: true, posisi: true, mitraTargets: true, updatedAt: true, candidates: { select: { replacementMitraProfileId: true, status: true } } },
+      select: { id: true, jumlah: true, type: true, posisi: true, mitraTargets: true, vendorSubmittedAt: true, candidates: { select: { replacementMitraProfileId: true, status: true } } },
     });
 
     if (!osRequest) {
       return NextResponse.json({ error: "Request tidak ditemukan atau tidak dapat menerima kandidat." }, { status: 404 });
     }
-    if (osRequest.type === "PERGANTIAN" && Date.now() - osRequest.updatedAt.getTime() > 2 * 60 * 60 * 1000) {
-      return NextResponse.json({ error: "Batas waktu pengisian kandidat pergantian (2 jam) telah berakhir." }, { status: 409 });
+    const vendor = await prisma.vendor.findUnique({ where: { id: vendorId! }, select: { availablePositionCodes: true } });
+    if (!parseVendorPositionCodes(vendor?.availablePositionCodes).includes(getPositionCode(osRequest.posisi))) {
+      return NextResponse.json({ error: "Vendor tidak diizinkan menyediakan jabatan untuk request ini." }, { status: 403 });
     }
     const allReplacementTargetIds = Array.isArray(osRequest.mitraTargets)
       ? osRequest.mitraTargets.filter((id): id is string => typeof id === "string")
@@ -395,7 +397,10 @@ export async function POST(req: NextRequest) {
           vendorId,
           status: "VENDOR_SELECTED",
         },
-        data: { status: "WAITING_SELECTION" },
+        data: {
+          status: "WAITING_SELECTION",
+          ...(osRequest.vendorSubmittedAt ? {} : { vendorSubmittedAt: new Date() }),
+        },
       });
       if (reservedRequest.count !== 1) return false;
 
