@@ -2603,9 +2603,27 @@ export function VendorManagementPage() {
           <p>Email: <strong>{detailVendor.email || "-"}</strong></p><p>No. Telepon: <strong>{detailVendor.phone || "-"}</strong></p>
           <p>Jumlah Mitra OS: <strong>{detailVendor._count?.users || 0}</strong></p>
           <label className="flex items-center gap-2">Management fee
-            <select className={fieldClass} value={detailVendor.managementFeeRate ?? 0.035} disabled={saving} onChange={(event) => void updateManagementFee(detailVendor, Number(event.target.value))}>
-              <option value="0.035">3,5%</option><option value="0.04">4%</option>
-            </select>
+            <span className="flex items-center gap-2">
+              <input
+                aria-label="Management fee vendor dalam persen"
+                className={`${fieldClass} w-24`}
+                type="number"
+                min="3.5"
+                max="4"
+                step="0.1"
+                defaultValue={((detailVendor.managementFeeRate ?? 0.035) * 100).toFixed(1)}
+                disabled={saving}
+                onBlur={(event) => {
+                  const percentage = Number(event.currentTarget.value);
+                  if (Number.isFinite(percentage) && percentage >= 3.5 && percentage <= 4) {
+                    void updateManagementFee(detailVendor, percentage / 100);
+                  } else {
+                    setError("Management fee harus antara 3,5% dan 4%.");
+                  }
+                }}
+              />
+              <span>%</span>
+            </span>
           </label>
           <p>Alamat: <strong>{detailVendor.address || "-"}</strong></p><p>NPWP: <strong>{detailVendor.npwp || "-"}</strong></p>
           <p>Nama PIC: <strong>{detailVendor.picName || "-"}</strong></p><p>No. HP PIC: <strong>{detailVendor.picPhone || "-"}</strong></p>

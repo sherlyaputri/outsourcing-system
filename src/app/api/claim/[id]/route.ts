@@ -48,3 +48,30 @@ export async function GET(
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
+
+export async function DELETE(
+  _req: NextRequest,
+  { params }: { params: { id: string } }
+) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session || session.user.role !== "FINANCE") {
+      return NextResponse.json({ error: "Hanya Finance yang dapat menghapus klaim." }, { status: 403 });
+    }
+
+    const claim = await prisma.claim.findUnique({
+      where: { id: params.id },
+      select: { id: true, invoice: { select: { status: true } } },
+    });
+    if (!claim) return NextResponse.json({ error: "Klaim tidak ditemukan." }, { status: 404 });
+    if (claim.invoice?.status !== "DRAFT") {
+      return NextResponse.json({ error: "Klaim hanya dapat dihapus dari invoice Draft." }, { status: 409 });
+    }
+
+    await prisma.claim.delete({ where: { id: claim.id } });
+    return NextResponse.json({ deleted: true, id: claim.id });
+  } catch (error) {
+    console.error("Claim DELETE error:", error);
+    return NextResponse.json({ error: "Gagal menghapus klaim." }, { status: 500 });
+  }
+}

@@ -98,6 +98,13 @@ export function InvoiceManagementPage() {
     catch (err) { setError(err instanceof Error ? err.message : "Gagal menambahkan klaim."); }
     finally { setBusy(false); }
   }
+  async function deleteClaim(claim: Claim) {
+    if (!window.confirm(`Hapus klaim ${claim.jenisClaim} sebesar ${formatCurrency(claim.nominal)}?`)) return;
+    setError(""); setBusy(true);
+    try { await request(`/api/claim/${claim.id}`, "DELETE"); await reload(); }
+    catch (err) { setError(err instanceof Error ? err.message : "Gagal menghapus klaim."); }
+    finally { setBusy(false); }
+  }
   async function pay(event: FormEvent<HTMLFormElement>, invoice: Invoice) {
     event.preventDefault(); setError(""); setBusy(true);
     const form = new FormData(event.currentTarget); const file = form.get("proof");
@@ -135,8 +142,23 @@ export function InvoiceManagementPage() {
       {selected && <div className="fixed inset-0 z-50 overflow-y-auto bg-black/40 p-4" role="dialog" aria-modal="true"><div className="mx-auto my-8 max-w-5xl space-y-4 rounded-xl bg-background p-5 shadow-xl"><div className="flex justify-between"><h2 className="text-xl font-bold">Detail Invoice {selected.nomorInvoice}</h2><button onClick={() => setSelected(null)} aria-label="Tutup">✕</button></div><p>{selected.vendor?.name} · {dateLabel(selected.periodeMulai)} – {dateLabel(selected.periodeAkhir)} · {selected.status}</p>
         <h3 className="font-semibold">Biaya per Hub</h3><table className="w-full text-sm"><thead><tr>{["Hub", "Jumlah Mitra", "Hari Kerja", "Biaya"].map(x => <th className="p-2 text-left" key={x}>{x}</th>)}</tr></thead><tbody>{selected.details?.hubs.map(h => <tr className="border-t" key={h.nama}><td className="p-2">{h.nama}</td><td className="p-2">{h.jumlahMitra}</td><td className="p-2">{h.totalHariKerja}</td><td className="p-2">{formatCurrency(h.biayaVendor)}</td></tr>)}</tbody></table>
         <h3 className="font-semibold">Rincian Mitra</h3><div className="max-h-56 overflow-auto"><table className="w-full text-sm"><thead><tr>{["Nama", "ID", "Hub", "Role", "Hari Hadir", "Tidak Hadir", "Tarif", "Total"].map(x => <th className="p-2 text-left" key={x}>{x}</th>)}</tr></thead><tbody>{selected.details?.mitra.map(m => <tr className="border-t" key={m.idMitra + m.nama}><td className="p-2">{m.nama}</td><td className="p-2">{m.idMitra}</td><td className="p-2">{m.hub}</td><td className="p-2">{m.role}</td><td className="p-2">{m.hariHadir}</td><td className="p-2">{m.hariTidakHadir ?? "-"}</td><td className="p-2">{formatCurrency(m.tarif)}</td><td className="p-2">{formatCurrency(m.totalBiaya)}</td></tr>)}</tbody></table></div>
-        <div className="flex items-center justify-between"><h3 className="font-semibold">Data Klaim</h3><Button size="sm" variant="outline" onClick={() => downloadClaims(selected)}>Unduh Data Klaim</Button></div><table className="w-full text-sm"><thead><tr>{["Tanggal", "Jenis", "Keterangan", "Nominal"].map(x => <th className="p-2 text-left" key={x}>{x}</th>)}</tr></thead><tbody>{selected.claims.map(c => <tr className="border-t" key={c.id}><td className="p-2">{dateLabel(c.createdAt)}</td><td className="p-2">{c.jenisClaim}</td><td className="p-2">{c.catatan || "-"}</td><td className="p-2">{formatCurrency(c.nominal)}</td></tr>)}</tbody></table>
-        <div className="space-y-1 border-t pt-3 text-right text-sm"><p>Biaya vendor: {formatCurrency(selected.biayaVendor)}</p><p>Management fee ({(selected.managementFeeRate * 100).toLocaleString("id-ID")}%) : {formatCurrency(invoiceFee(selected))}</p><p>Total klaim: −{formatCurrency(claimTotal(selected))}</p><p>PPN (11% dari management fee): {formatCurrency(invoicePpn(selected))}</p><p>PPh (2,5% dari management fee): −{formatCurrency(invoicePph(selected))}</p><p className="text-lg font-bold">Total tagihan: {formatCurrency(invoiceTotal(selected))}</p>{selected.status === "PUBLISHED" && selected.statusPembayaran !== "PAID" ? <p>Invoice menunggu pembayaran.</p> : null}{selected.statusPembayaran === "PAID" && <p>Dibayar {formatCurrency(selected.nominalPembayaran || 0)} pada {dateLabel(selected.tanggalPembayaran)} · {selected.buktiTransferNama}</p>}{selected.status === "CANCELLED" && <p className="text-red-700">Dibatalkan {dateLabel(selected.cancelledAt)}: {selected.cancellationReason}</p>}</div>
+        <div className="flex items-center justify-between"><h3 className="font-semibold">Data Klaim (Versi final akan disambungkan ke Mobile)</h3><Button size="sm" variant="outline" onClick={() => downloadClaims(selected)}>Unduh Data Klaim</Button></div><table className="w-full text-sm"><thead><tr>{["Tanggal", "Jenis", "Keterangan", "Nominal"].map(x => <th className="p-2 text-left" key={x}>{x}</th>)}</tr></thead><tbody>{selected.claims.map(c => <tr className="border-t" key={c.id}><td className="p-2">{dateLabel(c.createdAt)}</td><td className="p-2">{c.jenisClaim}</td><td className="p-2">{c.catatan || "-"}</td><td className="p-2"><div className="flex items-center justify-between gap-3"><span>{formatCurrency(c.nominal)}</span>{isFinance && selected.status === "DRAFT" && <Button type="button" size="sm" variant="destructive" disabled={busy} className="h-6 w-6 rounded-full p-0 text-base leading-none" aria-label={`Hapus klaim ${c.jenisClaim}`} title="Hapus klaim" onClick={() => void deleteClaim(c)}>−</Button>}</div></td></tr>)}</tbody></table>
+        <section className="ml-auto max-w-lg border-t pt-3 text-sm">
+          <h3 className="mb-2 font-bold">RINGKASAN TAGIHAN</h3>
+          <div className="grid grid-cols-[1fr_auto] gap-x-8 gap-y-1">
+            <span>Biaya Vendor</span><strong className="text-right">{formatCurrency(selected.biayaVendor)}</strong>
+            <span>Management Fee ({(selected.managementFeeRate * 100).toLocaleString("id-ID")}%)</span><strong className="text-right">{formatCurrency(invoiceFee(selected))}</strong>
+            <span>PPN (11% dari Management Fee)</span><strong className="text-right">{formatCurrency(invoicePpn(selected))}</strong>
+            <span>PPh (2,5% dari Management Fee)</span><strong className="text-right">− {formatCurrency(invoicePph(selected))}</strong>
+            <span>Total Klaim</span><strong className="text-right">− {formatCurrency(claimTotal(selected))}</strong>
+            <strong className="mt-2 border-t pt-2 text-base">TOTAL TAGIHAN</strong><strong className="mt-2 border-t pt-2 text-right text-base">{formatCurrency(invoiceTotal(selected))}</strong>
+          </div>
+          <div className="mt-3 space-y-1 text-right text-xs text-muted-foreground">
+            {selected.status === "PUBLISHED" && selected.statusPembayaran !== "PAID" ? <p>Invoice menunggu pembayaran.</p> : null}
+            {selected.statusPembayaran === "PAID" && <p>Dibayar {formatCurrency(selected.nominalPembayaran || 0)} pada {dateLabel(selected.tanggalPembayaran)} · {selected.buktiTransferNama}</p>}
+            {selected.status === "CANCELLED" && <p className="text-red-700">Dibatalkan {dateLabel(selected.cancelledAt)}: {selected.cancellationReason}</p>}
+          </div>
+        </section>
         {isFinance && selected.status === "DRAFT" && <form onSubmit={e => void addClaim(e, selected)} className="grid gap-2 rounded-lg border p-3 md:grid-cols-4"><label>Jenis klaim<input required name="jenisClaim" className="mt-1 w-full rounded border bg-background p-2" /></label><label>Nominal<input required min="1" type="number" name="nominal" className="mt-1 w-full rounded border bg-background p-2" /></label><label>Keterangan<input name="catatan" className="mt-1 w-full rounded border bg-background p-2" /></label><Button disabled={busy} className="self-end">Tambah Klaim</Button></form>}
         {selected.status === "DRAFT" && <p className="text-xs text-muted-foreground">Draft: biaya dihitung dari jumlah absensi HADIR × Rp100.000. Management fee mengikuti pengaturan vendor; PPN dan PPh dihitung dari management fee. Total klaim dikurangkan penuh.</p>}
       </div></div>}
